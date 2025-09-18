@@ -6,7 +6,7 @@
   "devCommand": "npm run dev",
   "rewrites": [
     {
-      "source": "/((?!.*\\..*).*)",
+      "source": "/:path*",
       "destination": "/index.html"
     }
   ],
@@ -42,7 +42,7 @@
       ]
     },
     {
-      "source": "/icons/(.*)",
+      "source": "/icons/:path*",
       "headers": [
         {
           "key": "Cache-Control",
@@ -51,7 +51,7 @@
       ]
     },
     {
-      "source": "/(.*\\.(js|css|woff2?|png|jpg|jpeg|webp|svg))",
+      "source": "/:path*.(js|css|woff|woff2|png|jpg|jpeg|webp|svg)",
       "headers": [
         {
           "key": "Cache-Control",
