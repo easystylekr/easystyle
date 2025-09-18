@@ -782,7 +782,7 @@ class PurchaseProxyItem(models.Model):
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
 
     # 상태 및 URL 정보
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='pending')
     purchase_url = models.URLField(help_text="실제 구매할 쇼핑몰 URL")
     alternative_products = models.JSONField(default=list, blank=True, help_text="대체 상품 정보")
 

@@ -239,7 +239,7 @@ class StyleRecommendationListView(generics.ListCreateAPIView):
 
 
 @api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.AllowAny])
 def search_products(request):
     """
     고급 제품 검색 API
@@ -252,15 +252,35 @@ def search_products(request):
             'brand', 'category', 'store'
         )
         
-        # 검색 쿼리 적용
+        # 검색 쿼리 적용 (더 지능적인 검색)
         if data.get('query'):
             query = data['query']
-            queryset = queryset.filter(
-                Q(name__icontains=query) |
-                Q(brand__name__icontains=query) |
-                Q(description__icontains=query) |
-                Q(style_tags__contains=[query])
-            )
+
+            # 전체 쿼리로 검색
+            q_objects = Q(name__icontains=query) | Q(brand__name__icontains=query)
+            if query:  # description이 None이 아닌 경우만
+                q_objects |= Q(description__icontains=query)
+            # style_tags는 JSONField이므로 SQLite에서는 __contains 대신 __icontains 사용 불가
+            # 대신 문자열 검색으로 변경
+            try:
+                q_objects |= Q(style_tags__contains=[query])
+            except Exception:
+                # SQLite에서는 JSONField contains가 지원되지 않음
+                pass
+
+            # 개별 키워드로도 검색 (AI 스타일 설명 대응)
+            keywords = query.split()
+            for keyword in keywords:
+                if len(keyword) > 1:  # 1글자 이상인 키워드만
+                    q_objects |= (
+                        Q(name__icontains=keyword) |
+                        Q(brand__name__icontains=keyword) |
+                        Q(color__icontains=keyword)
+                    )
+                    if keyword:
+                        q_objects |= Q(description__icontains=keyword)
+
+            queryset = queryset.filter(q_objects)
         
         # 다양한 필터 적용
         if data.get('category'):

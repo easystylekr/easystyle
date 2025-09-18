@@ -183,6 +183,10 @@ GOOGLE_OAUTH2_CLIENT_SECRET = config('GOOGLE_OAUTH2_CLIENT_SECRET', default='')
 KAKAO_CLIENT_ID = config('KAKAO_CLIENT_ID', default='')
 KAKAO_CLIENT_SECRET = config('KAKAO_CLIENT_SECRET', default='')
 
+# Naver API Configuration
+NAVER_CLIENT_ID = config('NAVER_CLIENT_ID', default='')
+NAVER_CLIENT_SECRET = config('NAVER_CLIENT_SECRET', default='')
+
 # EasyStyle specific settings
 EASYSTYLE_SETTINGS = {
     'MAX_IMAGE_SIZE': 10 * 1024 * 1024,  # 10MB

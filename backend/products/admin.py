@@ -23,7 +23,7 @@ class ProductCategoryAdmin(admin.ModelAdmin):
     icon_display.short_description = 'Icon'
 
     def product_count(self, obj):
-        count = obj.product_set.count()
+        count = obj.products.count()
         url = reverse('admin:products_product_changelist') + f'?category={obj.id}'
         return format_html('<a href="{}">{} products</a>', url, count)
     product_count.short_description = 'Products'
@@ -38,7 +38,7 @@ class BrandAdmin(admin.ModelAdmin):
     ordering = ('name',)
 
     def product_count(self, obj):
-        count = obj.product_set.count()
+        count = obj.products.count()
         url = reverse('admin:products_product_changelist') + f'?brand={obj.id}'
         return format_html('<a href="{}">{} products</a>', url, count)
     product_count.short_description = 'Products'
@@ -139,13 +139,7 @@ class CartAdmin(admin.ModelAdmin):
 class CartItemInline(admin.TabularInline):
     model = CartItem
     extra = 0
-    readonly_fields = ('added_at', 'updated_at', 'subtotal_display')
-
-    def subtotal_display(self, obj):
-        if obj.pk:
-            return format_html('₩{:,}', int(obj.subtotal))
-        return '-'
-    subtotal_display.short_description = 'Subtotal'
+    readonly_fields = ('added_at', 'updated_at')
 
 
 @admin.register(CartItem)
@@ -153,7 +147,7 @@ class CartItemAdmin(admin.ModelAdmin):
     list_display = ('cart_user', 'product', 'size', 'quantity', 'subtotal_display', 'added_at')
     list_filter = ('added_at', 'updated_at', 'size')
     search_fields = ('cart__user__username', 'product__name', 'product__brand__name')
-    readonly_fields = ('added_at', 'updated_at', 'subtotal_display')
+    readonly_fields = ('added_at', 'updated_at')
 
     def cart_user(self, obj):
         return obj.cart.user.username

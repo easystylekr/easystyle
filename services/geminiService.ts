@@ -2,6 +2,8 @@ import { GoogleGenAI, Modality, Type } from "@google/genai";
 import type { Product } from '../types';
 import { ProductCategory } from '../types';
 import { productsAPI } from './apiService';
+import { searchKoreanFashionProducts } from './koreanShoppingService';
+import { searchNaverShoppingIntegrated } from './naverShoppingService';
 
 const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 
@@ -177,37 +179,49 @@ export const generateStyle = async (
 
 export const getProductsForStyle = async (description: string): Promise<Product[]> => {
     try {
-        // 백엔드 API를 사용하여 상품 검색
-        const searchData = {
-            query: description,
-            sort_by: 'relevance',
-            page: 1
-        };
-        
-        const response = await productsAPI.searchProducts(searchData);
-        
-        // 백엔드 응답을 프론트엔드 Product 타입으로 변환 (KRW 제품만 필터링)
-        const products: Product[] = response.results
-            .filter((item: any) => item.currency === 'KRW') // 국내 쇼핑몰 제품만 필터링
-            .map((item: any) => ({
-                id: item.uuid,
-                brand: item.brand_name,
-                name: item.name,
-                price: item.current_price,
-                imageUrl: item.main_image,
-                recommendedSize: item.recommended_size || 'M',
-                productUrl: item.product_url,
-                storeName: item.store_name,
-                category: mapCategoryToEnum(item.category_name),
-                currency: item.currency || 'KRW',
-                isSelected: false
-            }));
-        
-        return products.slice(0, 5); // 최대 5개 상품만 반환
+        console.log('AI 스타일링을 위한 상품 검색 시작:', description);
+
+        // 여러 소스에서 상품 검색을 병렬로 실행
+        const searchPromises = [
+            // 1. 기존 백엔드 데이터베이스 검색
+            searchFromBackendDatabase(description),
+            // 2. 네이버 쇼핑 검색
+            searchNaverShoppingIntegrated(description),
+            // 3. 한국 쇼핑몰 시뮬레이션 검색
+            searchKoreanFashionProducts(description)
+        ];
+
+        // 모든 검색 결과를 기다림 (실패한 것은 빈 배열로 처리)
+        const searchResults = await Promise.allSettled(searchPromises);
+
+        let allProducts: Product[] = [];
+
+        // 각 검색 결과를 합침
+        searchResults.forEach((result, index) => {
+            if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+                const sourceName = ['백엔드 DB', '네이버 쇼핑', '한국 쇼핑몰'][index];
+                console.log(`${sourceName}에서 ${result.value.length}개 상품 발견`);
+                allProducts.push(...result.value);
+            } else {
+                const sourceName = ['백엔드 DB', '네이버 쇼핑', '한국 쇼핑몰'][index];
+                console.warn(`${sourceName} 검색 실패:`, result.status === 'rejected' ? result.reason : '데이터 없음');
+            }
+        });
+
+        // 중복 제거 (상품명과 브랜드가 비슷한 경우)
+        const uniqueProducts = removeDuplicateProducts(allProducts);
+
+        // 관련성 점수 계산 및 정렬
+        const scoredProducts = calculateRelevanceScore(uniqueProducts, description);
+
+        console.log(`총 ${scoredProducts.length}개의 고유 상품 발견`);
+
+        // 상위 8개 상품 반환 (다양성 확보)
+        return scoredProducts.slice(0, 8);
 
     } catch (e) {
-        console.error("상품 검색 실패:", e);
-        // 백엔드 API 실패 시 기본 상품 목록 반환
+        console.error("통합 상품 검색 실패:", e);
+        // 모든 검색이 실패한 경우 기본 상품 목록 반환
         return await getFallbackProducts();
     }
 };
@@ -225,12 +239,87 @@ const mapCategoryToEnum = (categoryName: string): ProductCategory => {
     return categoryMap[categoryName] || ProductCategory.Top;
 };
 
+// 백엔드 데이터베이스에서 상품 검색
+const searchFromBackendDatabase = async (description: string): Promise<Product[]> => {
+    try {
+        console.log('백엔드 검색 description:', description, 'type:', typeof description);
+        const searchData = {
+            query: description,
+            sort_by: 'relevance',
+            page: 1
+        };
+        console.log('백엔드 검색 데이터:', searchData);
+
+        const response = await productsAPI.searchProducts(searchData);
+
+        return response.results
+            .filter((item: any) => item.currency === 'KRW')
+            .map((item: any) => ({
+                id: item.uuid,
+                brand: item.brand_name,
+                name: item.name,
+                price: item.current_price,
+                imageUrl: item.main_image,
+                recommendedSize: item.recommended_size || 'M',
+                productUrl: item.product_url,
+                storeName: item.store_name,
+                category: mapCategoryToEnum(item.category_name),
+                currency: item.currency || 'KRW',
+                isSelected: false
+            }));
+    } catch (e) {
+        console.error("백엔드 DB 검색 실패:", e);
+        return [];
+    }
+};
+
+// 중복 상품 제거 함수
+const removeDuplicateProducts = (products: Product[]): Product[] => {
+    const seen = new Set<string>();
+    return products.filter(product => {
+        // 상품명과 브랜드를 조합한 키로 중복 판단
+        const key = `${product.name.toLowerCase().trim()}-${product.brand.toLowerCase().trim()}`;
+        if (seen.has(key)) {
+            return false;
+        }
+        seen.add(key);
+        return true;
+    });
+};
+
+// 관련성 점수 계산 함수
+const calculateRelevanceScore = (products: Product[], description: string): Product[] => {
+    const keywords = description.toLowerCase().split(/\s+/);
+
+    return products.map(product => {
+        let score = 0;
+        const searchText = `${product.name} ${product.brand}`.toLowerCase();
+
+        // 키워드 매칭 점수
+        keywords.forEach(keyword => {
+            if (searchText.includes(keyword)) {
+                score += 2;
+            }
+        });
+
+        // 특정 브랜드나 쇼핑몰 보너스 점수
+        const preferredStores = ['무신사', '29CM', '스타일난다', '네이버쇼핑'];
+        if (preferredStores.some(store => product.storeName.includes(store))) {
+            score += 1;
+        }
+
+        return { ...product, score };
+    })
+    .sort((a: any, b: any) => b.score - a.score)
+    .map(({ score, ...product }) => product);
+};
+
 // 백엔드 API 실패 시 사용할 기본 상품 목록
 const getFallbackProducts = async (): Promise<Product[]> => {
     try {
         const response = await productsAPI.getProducts({ sort_by: 'newest' });
         return response.results
-            .filter((item: any) => item.currency === 'KRW') // 국내 쇼핑몰 제품만 필터링
+            .filter((item: any) => item.currency === 'KRW')
             .slice(0, 5)
             .map((item: any) => ({
                 id: item.uuid,
@@ -287,8 +376,15 @@ export const cropImageForProduct = async (
     }
     console.warn(`'${productName}'에 대한 크롭 이미지를 생성하지 못했습니다.`);
     return '';
-  } catch (error) {
+  } catch (error: any) {
     console.error(`'${productName}' 크롭 이미지 생성 중 오류:`, error);
+
+    // Gemini API 서비스 일시 중단 또는 과부하 처리
+    if (error?.message?.includes('503') || error?.message?.includes('Service Unavailable')) {
+      console.warn(`Gemini API 서비스 일시 중단. '${productName}' 크롭 이미지 건너뜀.`);
+      return '';
+    }
+
     return '';
   }
 };

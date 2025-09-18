@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from . import views
 from . import upload_views
 from . import inventory_views
+from . import naver_shopping_views
 
 # ViewSet을 위한 Router 설정
 router = DefaultRouter()
@@ -43,6 +44,11 @@ urlpatterns = [
     path('inventory/score/<uuid:product_uuid>/', inventory_views.get_purchaseability_score, name='purchaseability-score'),
     path('inventory/statistics/', inventory_views.get_inventory_statistics, name='inventory-statistics'),
     path('inventory/alternatives/<uuid:product_uuid>/', inventory_views.get_alternative_products, name='find-alternatives'),
+
+    # 네이버 쇼핑 API
+    path('naver-shopping/', naver_shopping_views.naver_shopping_proxy, name='naver-shopping-proxy'),
+    path('naver-shopping/categories/', naver_shopping_views.naver_shopping_categories, name='naver-shopping-categories'),
+    path('naver-shopping/popular/', naver_shopping_views.naver_shopping_popular_keywords, name='naver-shopping-popular'),
 
     # Router로 관리되는 ViewSet URLs 포함
     path('', include(router.urls)),
