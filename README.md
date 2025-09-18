@@ -179,4 +179,4 @@ easystyle/
 
 ---
 
-**EasyStyle으로 당신만의 완벽한 스타일을 찾아보세요!** ✨
+**EasyStyle으로 당신만의 완벽한 스타일을 찾아보세요!** ✨# easystyle
