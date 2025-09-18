@@ -4,6 +4,7 @@ import { AppScreen, Product, ProductCategory } from './types';
 import { generateStyle, getProductsForStyle, validatePrompt, cropImageForProduct } from './services/geminiService';
 import { optimizeImage, validateImageFile } from './utils/imageOptimization';
 import { productsAPI, authAPI, apiUtils } from './services/apiService';
+import { testSupabaseConnection } from './services/supabaseService';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { CartProvider } from './contexts/CartContext';
 import Header from './components/Header';
@@ -50,6 +51,10 @@ const HomePage: React.FC = () => {
     useEffect(() => {
         const loadInitialProducts = async () => {
             try {
+                // Supabase 연결 테스트
+                const isSupabaseConnected = await testSupabaseConnection();
+                console.log('Supabase 연결 상태:', isSupabaseConnected ? '성공' : '실패');
+
                 const response = await productsAPI.getProducts({ sort_by: 'newest' });
                 const initialProducts: Product[] = response.results.slice(0, 8).map((item: any) => ({
                     id: item.uuid,

@@ -84,7 +84,7 @@ WSGI_APPLICATION = "easystyle_backend.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# 임시로 SQLite 사용 (Supabase 연결 문제 해결 전까지)
+# SQLite 설정 (Django 백엔드용 - 로컬 개발)
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
@@ -92,7 +92,8 @@ DATABASES = {
     }
 }
 
-# Supabase PostgreSQL 설정 (연결 문제 해결 후 활성화)
+# Supabase PostgreSQL 설정 (클라이언트 측에서 사용)
+# Django는 SQLite 사용, 프론트엔드는 Supabase 직접 연결
 # DATABASES = {
 #     "default": {
 #         "ENGINE": "django.db.backends.postgresql",
