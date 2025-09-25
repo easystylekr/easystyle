@@ -108,3 +108,15 @@ View your app in AI Studio: https://ai.studio/apps/drive/18B6H8V0k66sL9dtdWLakey
 - 404 (Not Found)
   - favicon 404: data URL 아이콘으로 변경하여 네트워크 요청 없이 표시합니다(배포 포함).
   - SPA 라우팅 404: `vercel.json`의 rewrites가 모든 경로를 `index.html`로 전달합니다. API 경로(`/api/*`)는 제외됩니다.
+
+## Database Schema (MVP)
+
+다음 테이블을 사용합니다. `supabase/schema.sql`을 Supabase SQL Editor에서 실행해 생성하세요.
+
+- `profiles`(auth.users 미러): id, email(unique), display_name, role(user/admin), status, last_login_at, created/updated
+- `auth_events`: 로그인/로그아웃/가입/재설정 이벤트 로그(user_agent, created_at). 사용자 본인은 자신의 이벤트만 조회 가능
+- `style_requests`: 프런트엔드 스타일 요청 로그(prompt, model_provider, created_at)
+- `purchase_requests`: 구매 요청(items JSON, total_krw, status, admin_notes, created_at)
+- `search_jobs`/`search_results`: 관리자용 상품검색 잡/결과(에이전트 연동)
+
+관리자 조회는 서비스키(서버)에서 수행하거나, 추후 `profiles.role='admin'` 기반 정책을 확장하세요.

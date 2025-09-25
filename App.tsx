@@ -40,9 +40,15 @@ const App: React.FC = () => {
             setUserEmail(data.user?.email ?? null);
             if (data.user) await upsertProfileFromSession();
         });
-        const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+        const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
             setUserEmail(session?.user?.email ?? null);
             if (session?.user) await upsertProfileFromSession();
+            // 이벤트 로깅 (login/logout)
+            try {
+                const { logAuthEvent } = await import('./services/authLog');
+                if (event === 'SIGNED_IN') await logAuthEvent('login');
+                if (event === 'SIGNED_OUT') await logAuthEvent('logout');
+            } catch {}
         });
         return () => { sub.subscription?.unsubscribe(); };
     }, []);

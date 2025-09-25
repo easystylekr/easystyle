@@ -245,3 +245,8 @@ This file tracks development progress in near real time. Add an entry for every 
 - Links: PRD §1.1; Plan Week 3; 안정성/UX 개선
 - Files: `App.tsx`, `README.md`
 - Notes: 멀티 탭/세션 동기화 지연이나 환경 특이 케이스에서도 일관된 로그아웃 경험 제공
+## [2025-09-25 07:25 UTC] Supabase DB 스키마(MVP) 확장 및 로깅
+- Scope: `profiles` 확장(role/status/last_login_at), `auth_events`, `search_jobs`, `search_results` 추가; `purchase_requests`에 status/admin_notes. 로그인 시 last_login_at 갱신 및 auth 이벤트 로깅 추가.
+- Links: PRD §1(인증), §3(구매/검색); Plan Week 1-3; README DB Schema
+- Files: `supabase/schema.sql`, `services/profile.ts`, `services/authLog.ts`, `App.tsx`, `README.md`
+- Notes: RLS는 사용자 본인 데이터에 한해 접근 허용. 관리자 조회는 서비스키 또는 추후 role 기반 정책 확장으로 처리.

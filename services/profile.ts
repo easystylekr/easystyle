@@ -11,9 +11,9 @@ export async function upsertProfileFromSession() {
       id: user.id,
       email,
       display_name: displayName,
+      last_login_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'id' }
   );
 }
-
