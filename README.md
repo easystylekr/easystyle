@@ -121,3 +121,19 @@ View your app in AI Studio: https://ai.studio/apps/drive/18B6H8V0k66sL9dtdWLakey
 - `search_jobs`/`search_results`: 관리자용 상품검색 잡/결과(에이전트 연동)
 
 관리자 조회는 서비스키(서버)에서 수행하거나, 추후 `profiles.role='admin'` 기반 정책을 확장하세요.
+
+### Admin 설정 빠른 가이드
+- 관리자 지정(예: 본인 이메일):
+  - SQL Editor에서 실행:
+    ```sql
+    update public.profiles set role = 'admin' where email = 'your@email.com';
+    ```
+- 기존 사용자 프로필 채우기(최초 1회):
+  - SQL Editor에서 실행(권한상 가능한 경우):
+    ```sql
+    insert into public.profiles (id, email, display_name, role)
+    select u.id, u.email, split_part(u.email,'@',1), 'user'
+    from auth.users u
+    on conflict (id) do update set email = excluded.email;
+    ```
+- 정책: `is_admin(uid)` 함수와 admin 전용 정책을 추가했습니다. admin은 profiles/auth_events/purchase_requests/search_jobs/search_results를 조회(일부는 수정)할 수 있습니다.

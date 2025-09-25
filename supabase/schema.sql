@@ -2,6 +2,19 @@
 -- Enable required extensions
 create extension if not exists pgcrypto;
 
+-- helper: check admin role
+drop function if exists public.is_admin(uuid);
+create function public.is_admin(uid uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.profiles p where p.id = uid and p.role = 'admin'
+  );
+$$;
+
 -- profiles: one row per auth user
 create table if not exists public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
@@ -26,6 +39,15 @@ create policy "profiles_upsert_own" on public.profiles
 drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_update_own" on public.profiles
   for update using (auth.uid() = id);
+
+-- admin read access to profiles
+drop policy if exists "profiles_admin_ro" on public.profiles;
+create policy "profiles_admin_ro" on public.profiles
+  for select using (public.is_admin(auth.uid()));
+-- admin can update any profile (role/status)
+drop policy if exists "profiles_admin_rw" on public.profiles;
+create policy "profiles_admin_rw" on public.profiles
+  for update using (public.is_admin(auth.uid()));
 
 -- style_requests: track AI styling generations
 create table if not exists public.style_requests (
@@ -70,10 +92,18 @@ create policy "auth_events_own_ro" on public.auth_events
 drop policy if exists "auth_events_insert_own" on public.auth_events;
 create policy "auth_events_insert_own" on public.auth_events
   for insert with check (auth.uid() = user_id);
+-- admin read access to all auth events
+drop policy if exists "auth_events_admin_ro" on public.auth_events;
+create policy "auth_events_admin_ro" on public.auth_events
+  for select using (public.is_admin(auth.uid()));
 
 drop policy if exists "purchase_requests_user_rw" on public.purchase_requests;
 create policy "purchase_requests_user_rw" on public.purchase_requests
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+-- admin full access to purchase requests
+drop policy if exists "purchase_requests_admin_rw" on public.purchase_requests;
+create policy "purchase_requests_admin_rw" on public.purchase_requests
+  for all using (public.is_admin(auth.uid())) with check (public.is_admin(auth.uid()));
 
 -- Admin: 검색 잡과 결과 (상품검색 Agent)
 create table if not exists public.search_jobs (
@@ -88,6 +118,14 @@ alter table public.search_jobs enable row level security;
 drop policy if exists "search_jobs_user_rw" on public.search_jobs;
 create policy "search_jobs_user_rw" on public.search_jobs
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+-- admin read access to all jobs
+drop policy if exists "search_jobs_admin_ro" on public.search_jobs;
+create policy "search_jobs_admin_ro" on public.search_jobs
+  for select using (public.is_admin(auth.uid()));
+-- admin can update job status
+drop policy if exists "search_jobs_admin_rw" on public.search_jobs;
+create policy "search_jobs_admin_rw" on public.search_jobs
+  for update using (public.is_admin(auth.uid()));
 
 create table if not exists public.search_results (
   id uuid primary key default gen_random_uuid(),
@@ -107,3 +145,7 @@ create policy "search_results_job_owner_ro" on public.search_results
   for select using (exists (
     select 1 from public.search_jobs j where j.id = job_id and j.user_id = auth.uid()
   ));
+-- admin read access to all results
+drop policy if exists "search_results_admin_ro" on public.search_results;
+create policy "search_results_admin_ro" on public.search_results
+  for select using (public.is_admin(auth.uid()));

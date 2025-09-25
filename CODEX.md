@@ -255,3 +255,8 @@ This file tracks development progress in near real time. Add an entry for every 
 - Links: README DB Schema 주의사항
 - Files: `supabase/schema.sql`, `README.md`
 - Notes: Supabase(Postgres)에서 `IF NOT EXISTS`가 정책 생성에 지원되지 않아 42601 오류 해결
+## [2025-09-25 07:45 UTC] Admin 권한 함수/정책 추가 + README 가이드
+- Scope: `is_admin(uid)` SECURITY DEFINER 함수 추가, 주요 테이블에 admin 전용 읽기/쓰기 정책 보완; README에 admin 지정/프로필 백필 가이드 추가
+- Links: PRD §1, §3; Admin UX/데이터 운영
+- Files: `supabase/schema.sql`, `README.md`
+- Notes: 운영에서 서비스키 없이도 admin 사용자로 로그인 시 관리자 조회가 가능하도록 정책 구성
