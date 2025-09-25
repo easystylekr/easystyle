@@ -1,0 +1,7 @@
+{
+  "name": "EasyStyle 가상 스타일리스트",
+  "description": "AI 기반 가상 피팅룸으로 개인화된 스타일링 추천을 제공합니다. 사진을 업로드하고, 상황을 설명하면 AI가 완벽한 의상을 만들어주고 구매 링크까지 제공해 드립니다.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
