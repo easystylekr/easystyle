@@ -250,3 +250,8 @@ This file tracks development progress in near real time. Add an entry for every 
 - Links: PRD §1(인증), §3(구매/검색); Plan Week 1-3; README DB Schema
 - Files: `supabase/schema.sql`, `services/profile.ts`, `services/authLog.ts`, `App.tsx`, `README.md`
 - Notes: RLS는 사용자 본인 데이터에 한해 접근 허용. 관리자 조회는 서비스키 또는 추후 role 기반 정책 확장으로 처리.
+## [2025-09-25 07:35 UTC] Supabase CREATE POLICY 호환성 수정
+- Scope: 스키마에서 `CREATE POLICY IF NOT EXISTS`를 제거하고 `DROP POLICY IF EXISTS` + `CREATE POLICY` 패턴으로 변경
+- Links: README DB Schema 주의사항
+- Files: `supabase/schema.sql`, `README.md`
+- Notes: Supabase(Postgres)에서 `IF NOT EXISTS`가 정책 생성에 지원되지 않아 42601 오류 해결

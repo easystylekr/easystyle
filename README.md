@@ -112,6 +112,7 @@ View your app in AI Studio: https://ai.studio/apps/drive/18B6H8V0k66sL9dtdWLakey
 ## Database Schema (MVP)
 
 다음 테이블을 사용합니다. `supabase/schema.sql`을 Supabase SQL Editor에서 실행해 생성하세요.
+주의: PostgreSQL의 `CREATE POLICY`에는 `IF NOT EXISTS`가 없어, 스크립트는 안전하게 기존 정책을 `DROP POLICY IF EXISTS` 후 재생성합니다. 이미 테이블이 있어도 그대로 실행해도 됩니다.
 
 - `profiles`(auth.users 미러): id, email(unique), display_name, role(user/admin), status, last_login_at, created/updated
 - `auth_events`: 로그인/로그아웃/가입/재설정 이벤트 로그(user_agent, created_at). 사용자 본인은 자신의 이벤트만 조회 가능

@@ -17,11 +17,14 @@ create table if not exists public.profiles (
 alter table public.profiles enable row level security;
 
 -- Only the user can access their profile
-create policy if not exists "profiles_select_own" on public.profiles
+drop policy if exists "profiles_select_own" on public.profiles;
+create policy "profiles_select_own" on public.profiles
   for select using (auth.uid() = id);
-create policy if not exists "profiles_upsert_own" on public.profiles
+drop policy if exists "profiles_upsert_own" on public.profiles;
+create policy "profiles_upsert_own" on public.profiles
   for insert with check (auth.uid() = id);
-create policy if not exists "profiles_update_own" on public.profiles
+drop policy if exists "profiles_update_own" on public.profiles;
+create policy "profiles_update_own" on public.profiles
   for update using (auth.uid() = id);
 
 -- style_requests: track AI styling generations
@@ -34,7 +37,8 @@ create table if not exists public.style_requests (
 );
 
 alter table public.style_requests enable row level security;
-create policy if not exists "style_requests_user_rw" on public.style_requests
+drop policy if exists "style_requests_user_rw" on public.style_requests;
+create policy "style_requests_user_rw" on public.style_requests
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- purchase_requests: track purchase intents
@@ -60,12 +64,15 @@ create table if not exists public.auth_events (
 );
 
 alter table public.auth_events enable row level security;
-create policy if not exists "auth_events_own_ro" on public.auth_events
+drop policy if exists "auth_events_own_ro" on public.auth_events;
+create policy "auth_events_own_ro" on public.auth_events
   for select using (auth.uid() = user_id);
-create policy if not exists "auth_events_insert_own" on public.auth_events
+drop policy if exists "auth_events_insert_own" on public.auth_events;
+create policy "auth_events_insert_own" on public.auth_events
   for insert with check (auth.uid() = user_id);
 
-create policy if not exists "purchase_requests_user_rw" on public.purchase_requests
+drop policy if exists "purchase_requests_user_rw" on public.purchase_requests;
+create policy "purchase_requests_user_rw" on public.purchase_requests
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Admin: 검색 잡과 결과 (상품검색 Agent)
@@ -78,7 +85,8 @@ create table if not exists public.search_jobs (
 );
 
 alter table public.search_jobs enable row level security;
-create policy if not exists "search_jobs_user_rw" on public.search_jobs
+drop policy if exists "search_jobs_user_rw" on public.search_jobs;
+create policy "search_jobs_user_rw" on public.search_jobs
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 create table if not exists public.search_results (
@@ -94,7 +102,8 @@ create table if not exists public.search_results (
 );
 
 alter table public.search_results enable row level security;
-create policy if not exists "search_results_job_owner_ro" on public.search_results
+drop policy if exists "search_results_job_owner_ro" on public.search_results;
+create policy "search_results_job_owner_ro" on public.search_results
   for select using (exists (
     select 1 from public.search_jobs j where j.id = job_id and j.user_id = auth.uid()
   ));
