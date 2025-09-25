@@ -61,6 +61,7 @@ View your app in AI Studio: https://ai.studio/apps/drive/18B6H8V0k66sL9dtdWLakey
 - Import the repo in Vercel, Framework: Vite, Build Command: `npm run build`, Output: `dist`.
 - Add environment variables in Vercel Project Settings → Environment Variables:
   `GEMINI_API_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and optional `VITE_STYLE_PROVIDER`.
+ - `vercel.json` 포함: SPA 라우팅을 위해 `/(.*) → /index.html` 리라이트(단, `/api/*`는 제외) 설정이 추가되어 있습니다.
 
 ## Troubleshooting
 
@@ -104,3 +105,6 @@ View your app in AI Studio: https://ai.studio/apps/drive/18B6H8V0k66sL9dtdWLakey
   - `SignUpForm.tsx`, `SignInForm.tsx`: 폼 예시 컴포넌트
 - 기존 코드가 `apiService.ts`의 `register/login/logout` 또는 `new ApiClient().post(...)`를 호출해도, 이제 Supabase로 동작합니다.
 - `.env.local`에 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`가 없으면 스텁으로 동작(크래시 방지)하지만, 인증 기능은 비활성화됩니다.
+- 404 (Not Found)
+  - favicon 404: data URL 아이콘으로 변경하여 네트워크 요청 없이 표시합니다(배포 포함).
+  - SPA 라우팅 404: `vercel.json`의 rewrites가 모든 경로를 `index.html`로 전달합니다. API 경로(`/api/*`)는 제외됩니다.
