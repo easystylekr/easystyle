@@ -1,7 +1,8 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { AppScreen, Product, ProductCategory } from './types';
-import { generateStyle, getProductsForStyle, validatePrompt, cropImageForProduct } from './services/styleProvider';
-import { recordStyleRequest, recordPurchaseRequest } from './services/db';
+import { generateStyle, getProductsForStyle, validatePrompt, cropImageForProduct, detectGender } from './services/styleProvider';
+import { recordStyleRequest, recordPurchaseRequest, recordStyleSession } from './services/db';
+import { uploadBase64Image } from './services/storage';
 import Header from './components/Header';
 import Spinner from './components/Spinner';
 import ProductCard from './components/ProductCard';
@@ -194,7 +195,7 @@ const App: React.FC = () => {
         }
     }, [userEmail, screen]);
 
-    const executeStyleGeneration = async (finalPrompt: string) => {
+    const executeStyleGeneration = async (finalPrompt: string, meta?: { userPrompt?: string; userAnswer?: string }) => {
         if (!originalImage) return;
         setIsLoading(true);
         setError(null);
@@ -203,8 +204,31 @@ const App: React.FC = () => {
             setLoadingMessage('AI가 당신의 스타일을 만들고 있어요...');
             const { styledImageBase64, description } = await generateStyle(originalImage.base64, originalImage.mimeType, finalPrompt);
             setStyledResult({ imageBase64: styledImageBase64, description });
-            // Persist request meta (non-blocking)
-            recordStyleRequest(finalPrompt, (import.meta as any).env?.VITE_STYLE_PROVIDER).catch((e: any) => console.warn('recordStyleRequest failed', e));
+            try {
+              const { data: userData } = await supabase.auth.getUser();
+              const uid = userData.user?.id || 'anon';
+              const ts = Date.now();
+              const bucket = 'styling';
+              const origExt = (originalImage.mimeType?.split('/')?.[1] || 'png').toLowerCase();
+              const paths = {
+                orig: `${uid}/${ts}/original.${origExt}`,
+                styled: `${uid}/${ts}/styled.png`,
+              };
+              const uploadedOrig = await uploadBase64Image(bucket, paths.orig, originalImage.base64, originalImage.mimeType || 'image/png');
+              const uploadedStyled = await uploadBase64Image(bucket, paths.styled, styledImageBase64, 'image/png');
+              recordStyleSession({
+                userPrompt: meta?.userPrompt ?? prompt,
+                userAnswer: meta?.userAnswer ?? userAnswer,
+                fullPrompt: finalPrompt,
+                description,
+                modelProvider: (import.meta as any).env?.VITE_STYLE_PROVIDER,
+                originalImagePath: uploadedOrig?.path,
+                styledImagePath: uploadedStyled?.path,
+              }).catch((e) => console.warn('recordStyleSession failed', e));
+            } catch (e) {
+              console.warn('image upload/session record failed', e);
+              recordStyleRequest(finalPrompt, (import.meta as any).env?.VITE_STYLE_PROVIDER).catch((e2: any) => console.warn('recordStyleRequest failed', e2));
+            }
 
             setLoadingMessage('스타일에 맞는 상품을 찾고 있어요...');
             const productResults = await getProductsForStyle(description);
@@ -242,6 +266,17 @@ const App: React.FC = () => {
         setError(null);
         setIsLoading(true);
         setLoadingMessage('스타일 요청을 확인하는 중...');
+        // Step 0: detect gender to avoid mismatched styling
+        try {
+            if (originalImage) {
+                const g = await detectGender(originalImage.base64, originalImage.mimeType);
+                if (g.gender === 'unknown') {
+                    setAiQuestion({ question: '성별을 알려주시면 더 정확한 스타일을 추천드릴 수 있어요.', examples: ['남자', '여자', '상관없음'] });
+                    setIsLoading(false);
+                    return;
+                }
+            }
+        } catch {}
 
         const validationResult = await validatePrompt(prompt);
 
@@ -249,14 +284,22 @@ const App: React.FC = () => {
             setAiQuestion({ question: validationResult.question, examples: validationResult.examples });
             setIsLoading(false);
         } else {
-            await executeStyleGeneration(prompt);
+            let genderSuffix = '';
+            try {
+                if (originalImage) {
+                    const g2 = await detectGender(originalImage.base64, originalImage.mimeType);
+                    if (g2.gender === 'male') genderSuffix = '\\n\\n성별: 남자';
+                    else if (g2.gender === 'female') genderSuffix = '\\n\\n성별: 여자';
+                }
+            } catch {}
+            await executeStyleGeneration(`${prompt}${genderSuffix}`, { userPrompt: prompt, userAnswer: '' });
         }
     };
     
     const handleAnswerSubmit = async () => {
         if (!(await requireAuthAsync())) return;
         const fullPrompt = `${prompt}\n\n추가 정보: ${userAnswer}`;
-        await executeStyleGeneration(fullPrompt);
+        await executeStyleGeneration(fullPrompt, { userPrompt: prompt, userAnswer });
     };
 
     const handleProductSelect = (productToToggle: Product) => {

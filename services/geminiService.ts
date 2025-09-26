@@ -173,6 +173,30 @@ export const generateStyle = async (
   return { styledImageBase64, description: finalDescription };
 };
 
+export async function detectGender(imageBase64: string, imageMimeType: string): Promise<{ gender: 'male' | 'female' | 'unknown'; confidence?: number }> {
+  try {
+    const imagePart = fileToGenerativePart(imageBase64, imageMimeType);
+    const prompt = `이미지를 보고 인물의 성별을 판단하세요.
+가능한 결과는 오직 다음 중 하나입니다: male, female, unknown.
+자신이 없거나 얼굴/신체가 명확하지 않으면 unknown으로 하세요.
+추가 설명 없이 한 단어만 출력하세요.`;
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: {
+        parts: [imagePart, { text: prompt }]
+      }
+    });
+    const text = (response.text || '').trim().toLowerCase();
+    const normalized = text.replace(/[^a-z가-힣]/g, '');
+    if (/(male|남자|남성)/.test(normalized)) return { gender: 'male' };
+    if (/(female|여자|여성)/.test(normalized)) return { gender: 'female' };
+    return { gender: 'unknown' };
+  } catch (e) {
+    console.warn('detectGender failed', e);
+    return { gender: 'unknown' };
+  }
+}
+
 
 export const getProductsForStyle = async (description: string): Promise<Product[]> => {
     try {

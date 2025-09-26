@@ -5,6 +5,7 @@ import {
   generateStyle as geminiGenerate,
   getProductsForStyle as geminiProducts,
   cropImageForProduct as geminiCrop,
+  detectGender as geminiDetect,
 } from './geminiService';
 
 import {
@@ -12,6 +13,7 @@ import {
   generateStyle as nanoGenerate,
   getProductsForStyle as nanoProducts,
   cropImageForProduct as nanoCrop,
+  detectGender as nanoDetect,
 } from './nanoBananaModel';
 
 const provider = (import.meta.env.VITE_STYLE_PROVIDER || 'gemini').toLowerCase();
@@ -81,5 +83,18 @@ export const cropImageForProduct = async (...args: Parameters<typeof geminiCrop>
       return await nanoCrop(...args as any);
     }
     throw e;
+  }
+};
+
+export const detectGender = async (...args: Parameters<typeof geminiDetect>) => {
+  if (isNano) return nanoDetect(...args as any);
+  try {
+    return await geminiDetect(...args as any);
+  } catch (e) {
+    if (fallbackOnQuota && isQuotaError(e)) {
+      console.warn('[styleProvider] Gemini quota error on detectGender — falling back to NanoBanana');
+      return await nanoDetect(...args as any);
+    }
+    return { gender: 'unknown' } as any;
   }
 };

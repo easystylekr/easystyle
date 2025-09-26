@@ -66,12 +66,30 @@ create table if not exists public.style_requests (
   user_id uuid references auth.users (id) on delete set null,
   prompt text not null,
   model_provider text not null default 'gemini',
+  gender text,
+  full_prompt text,
+  user_prompt text,
+  user_answer text,
+  description text,
+  original_image_path text,
+  styled_image_path text,
   created_at timestamptz not null default now()
 );
 
 -- Query performance: list by user and recent first
 create index if not exists idx_style_requests_user_created_at
   on public.style_requests (user_id, created_at desc);
+
+-- Ensure new columns exist for existing table
+do $$ begin
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='style_requests' and column_name='full_prompt') then alter table public.style_requests add column full_prompt text; end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='style_requests' and column_name='user_prompt') then alter table public.style_requests add column user_prompt text; end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='style_requests' and column_name='user_answer') then alter table public.style_requests add column user_answer text; end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='style_requests' and column_name='description') then alter table public.style_requests add column description text; end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='style_requests' and column_name='original_image_path') then alter table public.style_requests add column original_image_path text; end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='style_requests' and column_name='styled_image_path') then alter table public.style_requests add column styled_image_path text; end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='style_requests' and column_name='gender') then alter table public.style_requests add column gender text; end if;
+end $$;
 
 alter table public.style_requests enable row level security;
 drop policy if exists "style_requests_user_rw" on public.style_requests;

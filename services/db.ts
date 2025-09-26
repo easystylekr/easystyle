@@ -25,6 +25,41 @@ export async function recordStyleRequest(prompt: string, provider?: string) {
   return inserted?.id ?? null;
 }
 
+export async function recordStyleSession(params: {
+  userPrompt: string;
+  userAnswer?: string;
+  fullPrompt: string;
+  description?: string;
+  modelProvider?: string;
+  originalImagePath?: string;
+  styledImagePath?: string;
+}) {
+  const { data } = await supabase.auth.getUser();
+  const user = data.user;
+  if (!user) return null;
+  const payload = {
+    user_id: user.id,
+    prompt: params.userPrompt,
+    user_prompt: params.userPrompt,
+    user_answer: params.userAnswer || '',
+    full_prompt: params.fullPrompt,
+    description: params.description || '',
+    model_provider: (params.modelProvider || (import.meta as any).env?.VITE_STYLE_PROVIDER || 'gemini').toString(),
+    original_image_path: params.originalImagePath || null,
+    styled_image_path: params.styledImagePath || null,
+  } as any;
+  const { data: inserted, error } = await (supabase as any)
+    .from('style_requests')
+    .insert(payload)
+    .select('id')
+    .single();
+  if (error) {
+    console.warn('[recordStyleSession] failed:', error);
+    return null;
+  }
+  return inserted?.id ?? null;
+}
+
 export async function recordPurchaseRequest(items: Product[], totalKrw: number) {
   const { data } = await supabase.auth.getUser();
   const user = data.user;

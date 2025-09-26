@@ -75,3 +75,6 @@ export const cropImageForProduct = async (
   return null;
 };
 
+export async function detectGender(_imageBase64: string, _imageMimeType: string): Promise<{ gender: 'male' | 'female' | 'unknown'; confidence?: number }> {
+  return { gender: 'unknown' };
+}
