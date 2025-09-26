@@ -291,7 +291,7 @@ const App: React.FC = () => {
             let processedBase64 = optimizedResult.base64;
             let processedMime = 'image/jpeg';
 
-            setLoadingMessage('AI가 당신의 스타일을 만들고 있어요... (최대 50초, 실패 시 자동 폴백)');
+            setLoadingMessage('AI가 당신의 스타일을 만들고 있어요... (Gemini → OpenAI → NanoBanana 자동 폴백)');
             const aiStartTime = performance.now();
             console.log('🤖 [executeStyleGeneration] Starting AI style generation...', {
                 processedImageSize: processedBase64.length,
@@ -301,10 +301,8 @@ const App: React.FC = () => {
             let styledImageBase64: string, description: string;
             let aiEndTime: number; // AI 생성 완료 시간 변수 선언
             try {
-                ({ styledImageBase64, description } = await withTimeout(
-                    generateStyle(processedBase64, processedMime, finalPrompt),
-                    50000  // 50초 - 균형잡힌 타임아웃
-                ));
+                // aiStyleService 내부의 폴백 시스템 활용 (Gemini → OpenAI → NanoBanana)
+                ({ styledImageBase64, description } = await generateStyle(processedBase64, processedMime, finalPrompt));
 
                 aiEndTime = performance.now();
                 const aiDuration = aiEndTime - aiStartTime;
@@ -345,10 +343,8 @@ const App: React.FC = () => {
                     const retryAiStartTime = performance.now();
                     console.log('🤖 [executeStyleGeneration] Starting retry AI generation...');
 
-                    ({ styledImageBase64, description } = await withTimeout(
-                        generateStyle(processedBase64, processedMime, finalPrompt),
-                        45000  // 45초로 조정
-                    ));
+                    // aiStyleService 내부 폴백 시스템 재시도
+                    ({ styledImageBase64, description } = await generateStyle(processedBase64, processedMime, finalPrompt));
 
                     const retryAiEndTime = performance.now();
                     console.log('✅ [executeStyleGeneration] Retry AI generation completed', {
