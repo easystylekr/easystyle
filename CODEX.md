@@ -315,3 +315,6 @@ This file tracks development progress in near real time. Add an entry for every 
 - Links: UX 개선
 - Files: `components/AuthModal.tsx`
 - Notes: 사용자가 입력을 시작하면 즉시 덮어씌워지며, 기존 입력이 있을 경우 프리필하지 않음
+## [2025-09-25 09:40 UTC] 배포 트리거
+- Scope: Vercel 자동 배포 확인을 위한 경량 커밋
+- Notes: 환경변수 변경 반영 및 최신 수정사항 배포
