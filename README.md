@@ -15,7 +15,9 @@ View your app in AI Studio: https://ai.studio/apps/drive/18B6H8V0k66sL9dtdWLakey
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Set environment variables in [.env.local](.env.local):
+   - `VITE_GEMINI_API_KEY`: Your Gemini API key (primary)
+   - `VITE_OPENAI_API_KEY`: Your OpenAI API key (optional fallback)
 3. Run the app:
    `npm run dev`
 # easystyle
@@ -141,3 +143,56 @@ View your app in AI Studio: https://ai.studio/apps/drive/18B6H8V0k66sL9dtdWLakey
     on conflict (id) do update set email = excluded.email;
     ```
 - 정책: `is_admin(uid)` 함수와 admin 전용 정책을 추가했습니다. admin은 profiles/auth_events/purchase_requests/search_jobs/search_results를 조회(일부는 수정)할 수 있습니다.
+
+## AI 모델 및 Fallback 시스템
+
+EasyStyle은 다중 AI 모델 fallback 시스템을 지원합니다. 안정적인 서비스 제공을 위해 여러 AI 제공업체를 순차적으로 시도합니다.
+
+### 지원하는 AI 제공업체:
+1. **Gemini** (1차 시도): Google Gemini 2.5 Flash Image Preview
+   - 이미지 생성 및 텍스트 분석 지원
+   - 고품질 패션 이미지 생성
+2. **OpenAI GPT-4 Vision** (2차 fallback): GPT-4 Omni
+   - 텍스트 기반 상세 스타일 분석
+   - 이미지 생성 불가 (분석만 지원)
+3. **NanoBanana** (3차 fallback): 개발/테스트용 더미 서비스
+
+### 자동 Fallback 동작:
+1. **Gemini API 시도** → 성공하면 이미지 생성 + 분석
+2. **Gemini 실패 시** → OpenAI GPT-4 Vision으로 자동 전환 (텍스트 분석)
+3. **모든 AI 실패 시** → NanoBanana 더미 서비스로 전환
+
+### 환경 변수 설정:
+```env
+VITE_GEMINI_API_KEY=your-gemini-api-key        # 필수
+VITE_OPENAI_API_KEY=your-openai-api-key        # 선택적 (fallback용)
+VITE_FALLBACK_ON_QUOTA=true                    # 쿼터 초과 시 fallback 활성화
+```
+
+### 사용 모델 추적:
+- 모든 AI 모델 사용 기록이 Supabase에 자동 저장됩니다
+- 성공/실패율, 응답 시간, 사용된 모델 정보 추적
+- 사용자별 통계 및 분석 가능
+
+### AI 모델 사용 추적 테이블 (Supabase):
+```sql
+CREATE TABLE ai_model_usage (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id),
+  user_email TEXT,
+  model_provider TEXT NOT NULL CHECK (model_provider IN ('gemini', 'openai')),
+  model_name TEXT NOT NULL,
+  prompt_text TEXT,
+  image_size INTEGER,
+  success BOOLEAN NOT NULL DEFAULT false,
+  error_message TEXT,
+  response_time_ms INTEGER,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### Quota 한계 및 오류 상황:
+- **Gemini API**: Resource Exhausted, HTTP 429, 500 Internal Error
+- **OpenAI API**: Usage quota exceeded, Rate limit, Authentication error
+- **자동 복구**: 일시적 서버 오류 시 2회까지 자동 재시도
+- **사용자 안내**: 명확한 오류 메시지와 대안 제시

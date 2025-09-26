@@ -2,7 +2,17 @@ import { GoogleGenAI, Modality, Type } from "@google/genai";
 import type { Product } from '../types';
 import { ProductCategory } from '../types';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+const DEBUG = Boolean(import.meta.env?.VITE_AUTH_DEBUG === 'true');
+
+if (DEBUG) {
+  console.log('[geminiService] Initializing with API key present:', !!apiKey);
+  if (!apiKey) {
+    console.error('[geminiService] No API key found! Check VITE_GEMINI_API_KEY or GEMINI_API_KEY');
+  }
+}
+
+const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key' });
 
 const fileToGenerativePart = (base64Data: string, mimeType: string) => {
   return {
@@ -14,6 +24,10 @@ const fileToGenerativePart = (base64Data: string, mimeType: string) => {
 };
 
 export const validatePrompt = async (prompt: string): Promise<{ valid: true } | { valid: false; question: string; examples: string[] }> => {
+    if (!apiKey || apiKey === 'dummy-key') {
+      throw new Error('API 키가 설정되지 않았습니다. VITE_GEMINI_API_KEY 환경변수를 확인해 주세요.');
+    }
+
     if (!prompt || prompt.trim().length < 5) {
         return {
             valid: false,
@@ -79,6 +93,24 @@ export const generateStyle = async (
   imageMimeType: string,
   prompt: string
 ): Promise<{ styledImageBase64: string; description: string }> => {
+  if (!apiKey || apiKey === 'dummy-key') {
+    throw new Error('API 키가 설정되지 않았습니다. VITE_GEMINI_API_KEY 환경변수를 확인해 주세요.');
+  }
+
+  if (DEBUG) {
+    console.log('[geminiService] Starting style generation with:', {
+      hasImage: !!imageBase64,
+      imageSize: imageBase64?.length || 0,
+      mimeType: imageMimeType,
+      promptLength: prompt?.length || 0,
+      apiKeyPresent: !!apiKey
+    });
+  }
+
+  if (!imageBase64 || !prompt) {
+    throw new Error('이미지와 스타일 요청이 모두 필요합니다.');
+  }
+
   const imagePart = fileToGenerativePart(imageBase64, imageMimeType);
 
   // --- 1단계: 전문가 코디 제안 (텍스트) 생성 ---
@@ -115,7 +147,22 @@ export const generateStyle = async (
     });
     description = descriptionResponse.text.trim();
   } catch(error) {
+    if (DEBUG) {
+      console.error("[geminiService] Style description generation failed:", error);
+    }
     console.error("스타일 제안(설명) 생성 API 호출 실패:", error);
+
+    // API 키 관련 에러 처리
+    if (error && typeof error === 'object' && 'message' in error) {
+      const errorMessage = String(error.message).toLowerCase();
+      if (errorMessage.includes('api_key') || errorMessage.includes('unauthorized') || errorMessage.includes('403')) {
+        throw new Error('API 키 오류입니다. 환경변수 VITE_GEMINI_API_KEY를 확인해 주세요.');
+      }
+      if (errorMessage.includes('quota') || errorMessage.includes('429')) {
+        throw new Error('API 사용량이 초과되었습니다. 잠시 후 다시 시도해 주세요.');
+      }
+    }
+
     throw new Error('스타일을 제안하는 데 실패했습니다. 다시 시도해 주세요.');
   }
 
@@ -139,27 +186,82 @@ export const generateStyle = async (
   };
 
   let styledImageBase64 = '';
-  try {
-    const imageResponse = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image-preview',
-        contents: {
-            parts: [imagePart, imageGenerationTextPart],
-        },
-        config: {
-            responseModalities: [Modality.IMAGE, Modality.TEXT],
-        },
-    });
+  let lastError: any = null;
 
-    if (imageResponse.candidates && imageResponse.candidates.length > 0) {
-        for (const part of imageResponse.candidates[0].content.parts) {
-            if (part.inlineData) {
-                styledImageBase64 = part.inlineData.data;
-                break;
-            }
+  // 재시도 로직 추가 (최대 2번 시도)
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      if (DEBUG) console.log(`[geminiService] Image generation attempt ${attempt}/2`);
+
+      const imageResponse = await ai.models.generateContent({
+          model: 'gemini-2.5-flash-image-preview',
+          contents: {
+              parts: [imagePart, imageGenerationTextPart],
+          },
+          config: {
+              responseModalities: [Modality.IMAGE, Modality.TEXT],
+          },
+      });
+
+      if (imageResponse.candidates && imageResponse.candidates.length > 0) {
+          for (const part of imageResponse.candidates[0].content.parts) {
+              if (part.inlineData) {
+                  styledImageBase64 = part.inlineData.data;
+                  break;
+              }
+          }
+      }
+
+      // 성공하면 루프 탈출
+      if (styledImageBase64) {
+        if (DEBUG) console.log(`[geminiService] Image generation succeeded on attempt ${attempt}`);
+        break;
+      }
+
+    } catch (error) {
+      lastError = error;
+      if (DEBUG) {
+        console.error(`[geminiService] Attempt ${attempt} failed:`, error);
+      }
+
+      // 재시도하지 않을 오류들 (즉시 throw)
+      if (error && typeof error === 'object' && 'message' in error) {
+        const errorMessage = String(error.message).toLowerCase();
+        if (errorMessage.includes('api_key') || errorMessage.includes('unauthorized') || errorMessage.includes('403')) {
+          throw new Error('API 키 오류입니다. 환경변수 VITE_GEMINI_API_KEY를 확인해 주세요.');
         }
+        if (errorMessage.includes('quota') || errorMessage.includes('429')) {
+          throw new Error('API 사용량이 초과되었습니다. 잠시 후 다시 시도해 주세요.');
+        }
+        if (errorMessage.includes('safety') || errorMessage.includes('content')) {
+          throw new Error('콘텐츠 정책에 위배되는 내용입니다. 다른 스타일로 시도해 주세요.');
+        }
+      }
+
+      // 500 오류나 일시적 오류는 재시도
+      if (attempt < 2) {
+        if (DEBUG) console.log(`[geminiService] Waiting before retry...`);
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 2초 대기
+        continue;
+      }
     }
-  } catch (error) {
-    console.error("스타일 이미지 생성 API 호출 실패:", error);
+  }
+
+  // 모든 시도가 실패한 경우 마지막 오류 처리
+  if (!styledImageBase64 && lastError) {
+    if (DEBUG) {
+      console.error("[geminiService] All attempts failed:", lastError);
+    }
+    console.error("스타일 이미지 생성 API 호출 실패:", lastError);
+
+    // 특정 에러 메시지 처리
+    if (lastError && typeof lastError === 'object' && 'message' in lastError) {
+      const errorMessage = String(lastError.message).toLowerCase();
+      if (errorMessage.includes('500') || errorMessage.includes('internal server error') || errorMessage.includes('internal error')) {
+        throw new Error('Google AI 서버에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      }
+    }
+
     throw new Error('스타일 이미지를 생성하는 데 실패했습니다. 다시 시도해 주세요.');
   }
 

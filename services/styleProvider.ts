@@ -47,13 +47,21 @@ export const validatePrompt = async (...args: Parameters<typeof geminiValidate>)
 
 export const generateStyle = async (...args: Parameters<typeof geminiGenerate>) => {
   if (isNano) return nanoGenerate(...args as any);
+
+  // 새로운 통합 AI 서비스 사용 (Gemini + OpenAI fallback)
   try {
-    return await geminiGenerate(...args as any);
+    const { generateStyleWithFallback } = await import('./aiStyleService');
+    const result = await generateStyleWithFallback(...args);
+
+    // 기존 인터페이스와 호환성을 위해 변환
+    return {
+      styledImageBase64: result.styledImageBase64 || '',
+      description: result.description
+    };
   } catch (e) {
     if (fallbackOnQuota && isQuotaError(e)) {
-      console.warn('[styleProvider] Gemini quota error on generateStyle — falling back to NanoBanana');
+      console.warn('[styleProvider] AI services quota error — falling back to NanoBanana');
       const result = await nanoGenerate(...args as any);
-      // 주석: 나노바나나 스텁은 이미지가 비어 있을 수 있음. App에서 폴백 처리됨.
       return result;
     }
     throw e;

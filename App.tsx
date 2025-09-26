@@ -3,6 +3,9 @@ import { AppScreen, Product, ProductCategory } from './types';
 import { generateStyle, getProductsForStyle, validatePrompt, cropImageForProduct } from './services/styleProvider';
 import { recordStyleRequest, recordPurchaseRequest, recordStyleSession } from './services/db';
 import { uploadBase64Image } from './services/storage';
+import { comprehensiveProductSearch, ProductSearchResult } from './services/shoppingSearchAgent';
+import { saveProductSearchSession, saveProductSearchResults } from './services/productStorageService';
+import { progressiveOptimization, createFastPreview } from './services/imageOptimizer';
 import Header from './components/Header';
 import Spinner from './components/Spinner';
 import ProductCard from './components/ProductCard';
@@ -30,10 +33,12 @@ const App: React.FC = () => {
     const [styledResult, setStyledResult] = useState<{ imageBase64: string; description: string } | null>(null);
     const [products, setProducts] = useState<Product[]>([]);
     const [selectedProducts, setSelectedProducts] = useState<Product[]>([]);
+    const [shoppingResults, setShoppingResults] = useState<ProductSearchResult[]>([]);
     const [requestDetails, setRequestDetails] = useState<{ count: number; total: number } | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [loadingMessage, setLoadingMessage] = useState('');
     const [error, setError] = useState<string | null>(null);
+    const [isGenerating, setIsGenerating] = useState(false);
     const [aiQuestion, setAiQuestion] = useState<AIQuestion | null>(null);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -134,23 +139,67 @@ const App: React.FC = () => {
         fileInputRef.current?.click();
     };
 
-    const handleImageSelect = (file: File) => {
+    const handleImageSelect = async (file: File) => {
         if (!requireAuth()) return;
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const result = e.target?.result as string;
-            const base64 = result.split(',')[1];
-            if (base64) {
-                setOriginalImage({ base64, mimeType: file.type, url: URL.createObjectURL(file) });
-                setScreen(AppScreen.Styling);
-                setError(null);
-            } else {
-                setError('이미지 파일을 처리하는 데 실패했습니다. 다른 파일을 시도해 주세요.');
-            }
-        };
-        reader.onerror = () => setError('이미지 파일을 읽는 중 오류가 발생했습니다.');
-        reader.readAsDataURL(file);
+
+        setIsLoading(true);
+        setLoadingMessage('이미지를 불러오는 중...');
+
+        try {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const result = e.target?.result as string;
+                    const base64 = result.split(',')[1];
+                    if (base64) {
+                        // 원본 이미지 설정
+                        const originalUrl = URL.createObjectURL(file);
+                        setOriginalImage({ base64, mimeType: file.type, url: originalUrl });
+
+                        // 빠른 미리보기 생성 (백그라운드에서)
+                        try {
+                            setLoadingMessage('미리보기 생성 중...');
+                            const previewUrl = await createFastPreview(result, 800);
+
+                            // 미리보기가 준비되면 URL 업데이트
+                            setOriginalImage(prev => prev ? {
+                                ...prev,
+                                url: previewUrl
+                            } : null);
+
+                            if (previewUrl !== result) {
+                                console.log('[ImageOptimizer] Fast preview created, size reduced');
+                            }
+                        } catch (previewError) {
+                            console.warn('[ImageOptimizer] Preview generation failed:', previewError);
+                            // 미리보기 생성 실패해도 원본으로 계속 진행
+                        }
+
+                        setScreen(AppScreen.Styling);
+                        setError(null);
+                    } else {
+                        setError('이미지 파일을 처리하는 데 실패했습니다. 다른 파일을 시도해 주세요.');
+                    }
+                } catch (error) {
+                    console.error('[ImageSelect] Processing error:', error);
+                    setError('이미지 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            reader.onerror = () => {
+                setError('파일을 읽는 데 실패했습니다. 다른 파일을 시도해 주세요.');
+                setIsLoading(false);
+            };
+
+            reader.readAsDataURL(file);
+        } catch (error) {
+            console.error('[ImageSelect] Error:', error);
+            setError('이미지 선택 중 오류가 발생했습니다.');
+            setIsLoading(false);
+        }
     };
 
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -196,63 +245,121 @@ const App: React.FC = () => {
     }, [userEmail, screen]);
 
     // Helpers to mitigate large/unsupported images on mobile (e.g., Z Flip)
-    const withTimeout = async <T,>(p: Promise<T>, ms = 20000): Promise<T> => {
+    const withTimeout = async <T,>(p: Promise<T>, ms = 60000): Promise<T> => {
         return await Promise.race([
             p,
             new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)) as Promise<T>,
         ]);
     };
 
-    const downscaleToJpegBase64 = (dataUrl: string, maxDim: number): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => {
-                const { width, height } = img;
-                const scale = Math.min(1, maxDim / Math.max(width, height));
-                const w = Math.max(1, Math.round(width * scale));
-                const h = Math.max(1, Math.round(height * scale));
-                const canvas = document.createElement('canvas');
-                canvas.width = w; canvas.height = h;
-                const ctx = canvas.getContext('2d');
-                if (!ctx) { reject(new Error('canvas')); return; }
-                ctx.drawImage(img, 0, 0, w, h);
-                const out = canvas.toDataURL('image/jpeg', 0.85);
-                resolve(out.split(',')[1]);
-            };
-            img.onerror = reject;
-            img.src = dataUrl;
-        });
-    };
+    // 이미지 최적화 함수는 services/imageOptimizer.ts로 이동됨
 
     const executeStyleGeneration = async (finalPrompt: string, meta?: { userPrompt?: string; userAnswer?: string }) => {
-        if (!originalImage) return;
+        if (!originalImage || isGenerating) return;
+
+        const overallStartTime = performance.now();
+        console.log('🚀 [executeStyleGeneration] Starting style generation process', {
+            promptLength: finalPrompt.length,
+            originalImageSize: originalImage.base64.length,
+            timestamp: new Date().toLocaleTimeString()
+        });
+
+        setIsGenerating(true);
         setIsLoading(true);
         setError(null);
 
         try {
             // Preprocess image: convert to JPEG and downscale to reduce model latency/errors
-            setLoadingMessage('이미지를 준비하고 있어요...');
             const srcDataUrl = `data:${originalImage.mimeType};base64,${originalImage.base64}`;
-            let processedBase64 = await downscaleToJpegBase64(srcDataUrl, 1600);
+
+            // 점진적 최적화로 사용자 경험 개선
+            const imageOptStartTime = performance.now();
+            console.log('🖼️ [executeStyleGeneration] Starting image optimization...');
+            const optimizedResult = await progressiveOptimization(srcDataUrl, (stage, progress) => {
+                setLoadingMessage(`${stage} (${Math.round(progress)}%)`);
+                console.log(`📊 [imageOptimization] ${stage}: ${Math.round(progress)}%`);
+            });
+            const imageOptEndTime = performance.now();
+            const imageOptDuration = imageOptEndTime - imageOptStartTime;
+            console.log('✅ [executeStyleGeneration] Image optimization completed', {
+                duration: `${imageOptDuration.toFixed(0)}ms`,
+                originalSize: originalImage.base64.length,
+                optimizedSize: optimizedResult.base64.length,
+                compressionRatio: `${(optimizedResult.compressionRatio || 0).toFixed(1)}%`
+            });
+
+            let processedBase64 = optimizedResult.base64;
             let processedMime = 'image/jpeg';
 
-            setLoadingMessage('AI가 당신의 스타일을 만들고 있어요...');
+            setLoadingMessage('AI가 당신의 스타일을 만들고 있어요... (최대 80초 소요)');
+            const aiStartTime = performance.now();
+            console.log('🤖 [executeStyleGeneration] Starting AI style generation...', {
+                processedImageSize: processedBase64.length,
+                prompt: finalPrompt.substring(0, 100) + (finalPrompt.length > 100 ? '...' : '')
+            });
+
             let styledImageBase64: string, description: string;
+            let aiEndTime: number; // AI 생성 완료 시간 변수 선언
             try {
                 ({ styledImageBase64, description } = await withTimeout(
                     generateStyle(processedBase64, processedMime, finalPrompt),
-                    20000
+                    80000  // 80초로 연장
                 ));
+
+                aiEndTime = performance.now();
+                const aiDuration = aiEndTime - aiStartTime;
+                console.log('✅ [executeStyleGeneration] AI style generation completed', {
+                    duration: `${aiDuration.toFixed(0)}ms`,
+                    generatedImageSize: styledImageBase64?.length || 0,
+                    descriptionLength: description?.length || 0
+                });
             } catch (e) {
+                const aiErrorTime = performance.now();
+                const firstAttemptDuration = aiErrorTime - aiStartTime;
+                console.warn('⚠️ [executeStyleGeneration] First AI attempt failed', {
+                    error: e instanceof Error ? e.message : String(e),
+                    duration: `${firstAttemptDuration.toFixed(0)}ms`
+                });
+
                 // Retry once with smaller image if timeout or error
                 try {
-                    setLoadingMessage('이미지를 최적화하는 중...');
-                    processedBase64 = await downscaleToJpegBase64(srcDataUrl, 1024);
+                    setLoadingMessage('더 작은 크기로 재시도 중...');
+
+                    const retryOptStartTime = performance.now();
+                    console.log('🔄 [executeStyleGeneration] Starting retry with smaller image...');
+
+                    // 더 작은 크기로 재최적화
+                    const retryResult = await progressiveOptimization(srcDataUrl, (stage, progress) => {
+                        setLoadingMessage(`재시도: ${stage} (${Math.round(progress)}%)`);
+                        console.log(`📊 [retryOptimization] ${stage}: ${Math.round(progress)}%`);
+                    });
+
+                    const retryOptEndTime = performance.now();
+                    console.log('✅ [executeStyleGeneration] Retry optimization completed', {
+                        duration: `${(retryOptEndTime - retryOptStartTime).toFixed(0)}ms`,
+                        retryImageSize: retryResult.base64.length
+                    });
+
+                    processedBase64 = retryResult.base64;
+
+                    const retryAiStartTime = performance.now();
+                    console.log('🤖 [executeStyleGeneration] Starting retry AI generation...');
+
                     ({ styledImageBase64, description } = await withTimeout(
                         generateStyle(processedBase64, processedMime, finalPrompt),
-                        22000
+                        60000  // 60초로 연장
                     ));
+
+                    const retryAiEndTime = performance.now();
+                    console.log('✅ [executeStyleGeneration] Retry AI generation completed', {
+                        duration: `${(retryAiEndTime - retryAiStartTime).toFixed(0)}ms`,
+                        generatedImageSize: styledImageBase64?.length || 0
+                    });
                 } catch (e2: any) {
+                    console.error('❌ [executeStyleGeneration] Retry also failed', {
+                        error: e2 instanceof Error ? e2.message : String(e2),
+                        totalDuration: `${(performance.now() - aiStartTime).toFixed(0)}ms`
+                    });
                     throw e2;
                 }
             }
@@ -284,41 +391,163 @@ const App: React.FC = () => {
             }
 
             setLoadingMessage('스타일에 맞는 상품을 찾고 있어요...');
+            const productStartTime = performance.now();
+            console.log('🛍️ [executeStyleGeneration] Starting product recommendation...');
             const productResults = await withTimeout(getProductsForStyle(description), 12000).catch(() => []) as Product[];
+            const productEndTime = performance.now();
+            console.log('✅ [executeStyleGeneration] Product recommendation completed', {
+                duration: `${(productEndTime - productStartTime).toFixed(0)}ms`,
+                productCount: productResults.length
+            });
+
+            // 추가: 쇼핑 검색 AI Agent로 실제 구매 가능한 상품 검색
+            let shoppingStartTime: number, shoppingEndTime: number;
+            try {
+                setLoadingMessage('실제 구매 가능한 상품을 찾고 있어요...');
+                shoppingStartTime = performance.now();
+                console.log('🛒 [executeStyleGeneration] Starting shopping search AI agent...');
+
+                const shoppingSearchRequest = {
+                    styleDescription: description,
+                    gender: meta?.userAnswer?.includes('남') || meta?.userPrompt?.includes('남') ? 'male' as const :
+                           meta?.userAnswer?.includes('여') || meta?.userPrompt?.includes('여') ? 'female' as const : 'unisex' as const,
+                    ageGroup: meta?.userAnswer || meta?.userPrompt
+                };
+
+                console.log('📋 [shoppingSearch] Request parameters', {
+                    descriptionLength: description.length,
+                    gender: shoppingSearchRequest.gender,
+                    ageGroup: shoppingSearchRequest.ageGroup || 'not specified'
+                });
+
+                const shoppingResults = await comprehensiveProductSearch(shoppingSearchRequest);
+                shoppingEndTime = performance.now();
+                console.log('✅ [executeStyleGeneration] Shopping search completed', {
+                    duration: `${(shoppingEndTime - shoppingStartTime).toFixed(0)}ms`,
+                    shoppingResultsCount: shoppingResults.length
+                });
+                setShoppingResults(shoppingResults);
+
+                // Supabase에 검색 세션과 결과 저장
+                const sessionId = crypto.randomUUID();
+                await saveProductSearchSession({
+                    session_id: sessionId,
+                    style_description: description,
+                    gender: shoppingSearchRequest.gender,
+                    age_group: shoppingSearchRequest.ageGroup,
+                    total_products_found: shoppingResults.length,
+                    user_id: '' // 서비스에서 자동으로 채워짐
+                });
+
+                console.log('💾 [executeStyleGeneration] Saving shopping results to Supabase...');
+                const saveStartTime = performance.now();
+                await saveProductSearchResults(sessionId, description, shoppingResults);
+                console.log('✅ [executeStyleGeneration] Shopping results saved', {
+                    duration: `${(performance.now() - saveStartTime).toFixed(0)}ms`,
+                    sessionId: sessionId
+                });
+            } catch (shoppingError) {
+                shoppingEndTime = performance.now();
+                console.error('❌ [executeStyleGeneration] Shopping search failed', {
+                    error: shoppingError instanceof Error ? shoppingError.message : String(shoppingError),
+                    duration: `${(shoppingEndTime - shoppingStartTime).toFixed(0)}ms`
+                });
+                setShoppingResults([]);
+            }
 
             // First show products quickly, then attempt limited background crops
             const limited = (productResults || []).slice(0, Number((import.meta as any).env?.VITE_STYLING_MAX_PRODUCTS) || 8);
             setProducts(limited);
             setSelectedProducts(limited);
+
             setLoadingMessage('상품 이미지를 준비하고 있어요...');
+            const cropStartTime = performance.now();
+            console.log('✂️ [executeStyleGeneration] Starting product image cropping...', {
+                totalProducts: limited.length
+            });
+
             const cropLimit = Number((import.meta as any).env?.VITE_STYLING_CROP_LIMIT) || 4;
             Promise.allSettled(
-                limited.slice(0, cropLimit).map(async (product) => {
+                limited.slice(0, cropLimit).map(async (product, index) => {
+                    const productCropStartTime = performance.now();
+                    console.log(`🔄 [productCrop] Processing product ${index + 1}/${cropLimit}:`, {
+                        name: product.name,
+                        category: product.category
+                    });
+
                     const cropped = await cropImageForProduct(styledImageBase64, product.category, product.name);
+                    const productCropEndTime = performance.now();
+
                     if (cropped) {
+                        console.log(`✅ [productCrop] Product ${index + 1} cropped successfully`, {
+                            duration: `${(productCropEndTime - productCropStartTime).toFixed(0)}ms`,
+                            croppedImageSize: cropped.length
+                        });
                         setProducts(prev => prev.map(p => p.productUrl === product.productUrl ? { ...p, croppedImageBase64: cropped } : p));
+                    } else {
+                        console.log(`⚠️ [productCrop] Product ${index + 1} cropping failed`, {
+                            duration: `${(productCropEndTime - productCropStartTime).toFixed(0)}ms`
+                        });
                     }
                 })
-            ).catch(() => {});
+            ).then(() => {
+                console.log('✅ [executeStyleGeneration] All product cropping completed', {
+                    totalDuration: `${(performance.now() - cropStartTime).toFixed(0)}ms`,
+                    processedCount: Math.min(limited.length, cropLimit)
+                });
+            }).catch(() => {});
+
+            // 전체 프로세스 완료 시간 로깅
+            const overallEndTime = performance.now();
+            const totalDuration = overallEndTime - overallStartTime;
+            console.log('🎉 [executeStyleGeneration] Complete process finished!', {
+                totalDuration: `${totalDuration.toFixed(0)}ms`,
+                totalDurationMinutes: `${(totalDuration / 60000).toFixed(1)}min`,
+                imageOptimizationTime: `${imageOptDuration.toFixed(0)}ms`,
+                aiGenerationTime: styledImageBase64 ? `${(aiEndTime || performance.now()) - aiStartTime}ms` : 'failed',
+                productRecommendationTime: `${(productEndTime - productStartTime).toFixed(0)}ms`,
+                shoppingSearchTime: `${((shoppingEndTime || performance.now()) - (shoppingStartTime || overallStartTime)).toFixed(0)}ms`,
+                breakdown: {
+                    imageOptimization: `${((imageOptDuration / totalDuration) * 100).toFixed(1)}%`,
+                    aiGeneration: `${(((aiEndTime || performance.now()) - aiStartTime) / totalDuration * 100).toFixed(1)}%`,
+                    productSearch: `${(((productEndTime - productStartTime) / totalDuration) * 100).toFixed(1)}%`,
+                    shoppingSearch: `${(((shoppingEndTime || performance.now()) - (shoppingStartTime || overallStartTime)) / totalDuration * 100).toFixed(1)}%`,
+                    other: `${(100 - ((imageOptDuration + (aiEndTime || performance.now() - aiStartTime) + (productEndTime - productStartTime) + ((shoppingEndTime || performance.now()) - (shoppingStartTime || overallStartTime))) / totalDuration * 100)).toFixed(1)}%`
+                }
+            });
 
             setScreen(AppScreen.Result);
         } catch (err: any) {
             console.error(err);
+
+            // 오류 유형별 사용자 안내
+            const errorMessage = err?.message || '';
+            if (errorMessage.includes('Google AI 서버') || errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
+                setError('Google AI 서버가 일시적으로 불안정합니다. 몇 분 후 다시 시도해 주세요.');
+                return;
+            }
+
+            if (errorMessage.includes('timeout')) {
+                setError('네트워크 상황이 좋지 않아 시간이 오래 걸리고 있습니다. 다시 시도해 주세요.');
+                return;
+            }
+
             // Fallback: 텍스트 기반 추천으로 전환하여 사용자 흐름 유지
             try {
                 setLoadingMessage('이미지 생성이 지연되어 텍스트 기반 추천으로 전환합니다...');
                 const productResults = await withTimeout(getProductsForStyle(finalPrompt), 8000).catch(() => []) as Product[];
                 const limited = (productResults || []).slice(0, Number((import.meta as any).env?.VITE_STYLING_MAX_PRODUCTS) || 8);
-                setStyledResult({ imageBase64: '', description: '텍스트 기반 추천입니다. 이미지 생성이 지연되어도 제품 추천을 제공해드립니다.' });
+                setStyledResult({ imageBase64: '', description: '텍스트 기반 추천입니다. AI 이미지 생성 서비스가 일시적으로 불안정하여 제품 추천만 제공해드립니다.' });
                 setProducts(limited);
                 setSelectedProducts(limited);
                 setScreen(AppScreen.Result);
-                setError('이미지 생성이 지연되어 텍스트 기반 추천으로 전환했어요.');
+                setError('AI 이미지 생성 서비스 오류로 텍스트 기반 추천으로 전환했습니다.');
             } catch (e2) {
-                setError((err as any)?.message || '스타일 생성 중 오류가 발생했습니다.');
+                setError(errorMessage || '스타일 생성 중 오류가 발생했습니다.');
             }
         } finally {
             setIsLoading(false);
+            setIsGenerating(false);
             setAiQuestion(null);
             setUserAnswer('');
         }
@@ -394,7 +623,7 @@ const App: React.FC = () => {
         }
     };
 
-    const withTimeout = async <T,>(p: Promise<T>, ms = LOGOUT_TIMEOUT): Promise<T> => {
+    const withLogoutTimeout = async <T,>(p: Promise<T>, ms = LOGOUT_TIMEOUT): Promise<T> => {
         return await Promise.race([
             p,
             new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)) as Promise<T>,
@@ -416,7 +645,7 @@ const App: React.FC = () => {
         (async () => {
             try {
                 // 단일 호출: global scope만 시도 (네트워크 지연 시에도 시도는 하되 실패해도 무시)
-                try { await withTimeout((supabase as any).auth.signOut({ scope: 'global' })); } catch (e) { /* silent in production */ if (AUTH_DEBUG) console.debug('signOut (debug):', e); }
+                try { await withLogoutTimeout((supabase as any).auth.signOut({ scope: 'global' })); } catch (e) { /* silent in production */ if (AUTH_DEBUG) console.debug('signOut (debug):', e); }
                 clearSupabaseStorage();
             } finally {
                 // 최후 수단: 여전히 세션이 남아있다면 리로드로 정합성 확보(비차단, 약간 지연 후)
@@ -548,6 +777,84 @@ const App: React.FC = () => {
                             <p className="text-slate-400 text-center py-8">추천 상품을 찾지 못했습니다.</p>
                         )}
                     </div>
+
+                    {/* 쇼핑 검색 결과 섹션 */}
+                    {shoppingResults.length > 0 && (
+                        <div className="my-6">
+                            <h2 className="text-2xl font-bold text-slate-100 mb-4">🛒 실제 구매 가능한 상품</h2>
+                            <div className="grid grid-cols-1 gap-4">
+                                {shoppingResults.map((product, index) => (
+                                    <div key={index} className="bg-slate-800 border border-slate-700 rounded-lg p-4 hover:bg-slate-700 transition-colors">
+                                        <div className="flex gap-4">
+                                            {product.image && (
+                                                <img
+                                                    src={product.image}
+                                                    alt={product.title}
+                                                    className="w-20 h-20 object-cover rounded-md flex-shrink-0"
+                                                    onError={(e) => {
+                                                        (e.target as HTMLImageElement).style.display = 'none';
+                                                    }}
+                                                />
+                                            )}
+                                            <div className="flex-1 min-w-0">
+                                                <h3 className="text-lg font-semibold text-slate-100 truncate">
+                                                    {product.title}
+                                                </h3>
+                                                <p className="text-amber-400 font-bold text-lg mt-1">
+                                                    {product.price}
+                                                </p>
+                                                {product.brand && (
+                                                    <p className="text-slate-400 text-sm">
+                                                        {product.brand}
+                                                    </p>
+                                                )}
+                                                {product.description && (
+                                                    <p className="text-slate-300 text-sm mt-2 line-clamp-2">
+                                                        {product.description}
+                                                    </p>
+                                                )}
+                                                <div className="flex items-center justify-between mt-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`text-xs px-2 py-1 rounded-full ${
+                                                            product.source === 'korean'
+                                                                ? 'bg-amber-400 text-slate-900'
+                                                                : 'bg-sky-600 text-white'
+                                                        }`}>
+                                                            {product.source === 'korean' ? '🇰🇷 국내' : '🌍 해외'}
+                                                        </span>
+                                                        <span className="text-xs px-2 py-1 bg-slate-600 text-slate-300 rounded-full">
+                                                            {product.category}
+                                                        </span>
+                                                        {product.isValidUrl && (
+                                                            <span className="text-xs px-2 py-1 bg-green-600 text-white rounded-full">
+                                                                ✓ 유효
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {product.isValidUrl && (
+                                                        <a
+                                                            href={product.url}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="px-3 py-1 bg-amber-400 hover:bg-amber-300 text-slate-900 text-sm font-medium rounded-md transition-colors"
+                                                        >
+                                                            구매하기
+                                                        </a>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="mt-4 p-3 bg-slate-800/50 rounded-lg">
+                                <p className="text-slate-400 text-sm text-center">
+                                    💡 AI가 추천한 실제 구매 가능한 상품입니다. URL 유효성이 검증되었습니다.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
                     {error && <p className="text-red-400 mt-4 text-sm">{error}</p>}
                 </div>
 

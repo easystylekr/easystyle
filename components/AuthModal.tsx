@@ -18,7 +18,7 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
   const [pending, setPending] = useState(false);
   const [cooldown, setCooldown] = useState(0); // 재전송 쿨다운(초)
   const [loadingMessage, setLoadingMessage] = useState(''); // 로딩 중 메시지
-  const AUTH_TIMEOUT_MS = 30000; // 30초 타임아웃으로 증가
+  const AUTH_TIMEOUT_MS = 60000; // 60초 타임아웃으로 증가 (네트워크 상황 고려)
 
   const DEBUG = Boolean((import.meta as any).env?.VITE_AUTH_DEBUG);
   const [displayName, setDisplayName] = useState('');
@@ -87,15 +87,20 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
     setInfo(null);
     setLoadingMessage('로그인 중...');
 
-    // 5초 후 로딩 메시지 업데이트
+    // 3초 후 로딩 메시지 업데이트
     const messageTimeout1 = setTimeout(() => {
       if (loading) setLoadingMessage('서버 연결 중...');
-    }, 5000);
+    }, 3000);
 
-    // 15초 후 로딩 메시지 업데이트
+    // 8초 후 로딩 메시지 업데이트
     const messageTimeout2 = setTimeout(() => {
-      if (loading) setLoadingMessage('잠시만 기다려 주세요...');
-    }, 15000);
+      if (loading) setLoadingMessage('네트워크가 느려 시간이 걸리고 있습니다...');
+    }, 8000);
+
+    // 20초 후 추가 안내 메시지
+    const messageTimeout3 = setTimeout(() => {
+      if (loading) setLoadingMessage('연결을 시도하고 있습니다. 조금만 더 기다려 주세요...');
+    }, 20000);
 
     try {
       const t0 = performance.now();
@@ -105,6 +110,7 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
       // 타임아웃 정리
       clearTimeout(messageTimeout1);
       clearTimeout(messageTimeout2);
+      clearTimeout(messageTimeout3);
 
       if (DEBUG) console.debug(`[auth] signIn took ${dt}ms`, { error });
 
@@ -133,6 +139,7 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
       // 타임아웃 정리
       clearTimeout(messageTimeout1);
       clearTimeout(messageTimeout2);
+      clearTimeout(messageTimeout3);
 
       if (DEBUG) console.warn('login failed:', e);
 
