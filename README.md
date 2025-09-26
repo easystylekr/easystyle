@@ -51,6 +51,8 @@ View your app in AI Studio: https://ai.studio/apps/drive/18B6H8V0k66sL9dtdWLakey
 - 이메일/비밀번호/이름/휴대폰: 비밀번호 6자 이상, 유효한 이메일/휴대폰 형식 필요.
  - 이메일 확인(옵션): 회원가입 직후 자동 로그인을 시도합니다. Confirm email이 On이면 자동 로그인에 실패할 수 있으며, 이 경우 확인 메일 안내를 표시합니다. MVP에서는 Confirm email Off 설정을 권장합니다.
  - 422(Unprocessable) 대처: redirect_to 허용 URL 문제일 수 있습니다. Supabase Auth → URL configuration에서 Site URL 또는 Additional Redirect URLs에 현재 도메인(예: `http://localhost:5173`)을 추가하세요. `.env`에서 `VITE_EMAIL_CONFIRM=true` + `VITE_EMAIL_REDIRECT=<허용된 URL>`을 사용하면 명시적으로 설정됩니다.
+ - 422가 계속될 때(보안 정책/리다이렉트 이슈): `.env.local`에 `VITE_SIGNUP_MINIMAL=true` 설정 시 회원가입을 최소 페이로드(이메일/비밀번호)로만 시도합니다(진단용).
+ - Captcha/보안 설정: Supabase Auth(GoTrue)에서 reCAPTCHA가 활성화된 경우 토큰 없이 422가 발생할 수 있습니다. 개발 환경(Localhost)에서는 Captcha를 비활성화하거나 `VITE_SIGNUP_MINIMAL=true`로 최소 페이로드 경로를 사용하세요.
 - 비밀번호 재설정: 이메일 입력 후 "비밀번호 재설정" 버튼으로 메일 전송(redirect: 현재 도메인).
 - 가입 확인 메일 리다이렉트: 코드에서 `emailRedirectTo = window.location.origin`을 사용합니다. Supabase URL 설정의 Site URL 또는 Additional Redirect URLs에 현재 도메인이 포함되어야 합니다.
 - 네트워크 안정성: 회원가입/로그인 요청은 15초 타임아웃을 적용합니다. 지연될 경우 사용자에게 안내하고 버튼 상태를 복구합니다.

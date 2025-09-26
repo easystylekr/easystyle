@@ -20,25 +20,30 @@ export async function upsertProfileFromSession() {
     .from('profiles')
     .upsert(payload, { onConflict: 'id', returning: 'minimal' });
   if (error) {
-    // 상세 로깅으로 원인 파악을 돕습니다(권한/제약/유효성 등)
+    const msg = (error.message || '').toLowerCase();
     console.warn('[profiles.upsert] failed:', error);
-    // 충돌 등으로 upsert가 실패했다면 update→insert 순으로 폴백 시도
+    // 'phone' 컬럼이 스키마 캐시에 없는 경우를 대비해 폴백 시 phone을 제거하고 재시도
+    const stripPhone = msg.includes("phone") && msg.includes('schema cache');
+    const baseUpdate: any = {
+      email,
+      display_name: displayName,
+      last_login_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    if (!stripPhone) baseUpdate.phone = phone;
+
     try {
       const { error: updErr } = await supabase
         .from('profiles')
-        .update({
-          email,
-          display_name: displayName,
-          phone,
-          last_login_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
+        .update(baseUpdate)
         .eq('id', user.id);
       if (updErr) {
         console.warn('[profiles.update] failed:', updErr);
+        const insertPayload: any = { ...payload };
+        if (stripPhone) delete insertPayload.phone;
         const { error: insErr } = await supabase
           .from('profiles')
-          .insert(payload);
+          .insert(insertPayload);
         if (insErr) console.warn('[profiles.insert] failed:', insErr);
       }
     } catch (e) {

@@ -48,6 +48,8 @@ const App: React.FC = () => {
             // 로그인 상태면 혹시 남아있을 수 있는 로그아웃 표시를 해제
             if (data.user) {
                 setLoggingOut(false);
+                setError(null);
+                setShowAuth(false);
             }
             if (data.user) await upsertProfileFromSession();
         });
@@ -61,6 +63,8 @@ const App: React.FC = () => {
             if (event === 'SIGNED_IN') {
                 // 방어적으로 로그아웃 진행 UI를 해제
                 setLoggingOut(false);
+                setError(null);
+                setShowAuth(false);
             }
             if (session?.user) await upsertProfileFromSession();
             // 이벤트 로깅 (login/logout)
@@ -109,8 +113,23 @@ const App: React.FC = () => {
         return true;
     };
 
-    const openFilePicker = () => {
-        if (!requireAuth()) return;
+    const requireAuthAsync = async (): Promise<boolean> => {
+        if (userEmail) return true;
+        try {
+            const { data } = await supabase.auth.getUser();
+            if (data.user?.email) {
+                setUserEmail(data.user.email);
+                return true;
+            }
+        } catch {}
+        // 최종적으로 미인증이면 모달 표시
+        setAuthMode('login');
+        setShowAuth(true);
+        return false;
+    };
+
+    const openFilePicker = async () => {
+        if (!(await requireAuthAsync())) return;
         fileInputRef.current?.click();
     };
 
@@ -218,7 +237,7 @@ const App: React.FC = () => {
 
     // Fix: Restructured the conditional to ensure TypeScript correctly narrows the type of `validationResult`.
     const handleInitialStyleRequest = async () => {
-        if (!requireAuth()) return;
+        if (!(await requireAuthAsync())) return;
         setAiQuestion(null);
         setError(null);
         setIsLoading(true);
@@ -235,7 +254,7 @@ const App: React.FC = () => {
     };
     
     const handleAnswerSubmit = async () => {
-        if (!requireAuth()) return;
+        if (!(await requireAuthAsync())) return;
         const fullPrompt = `${prompt}\n\n추가 정보: ${userAnswer}`;
         await executeStyleGeneration(fullPrompt);
     };
@@ -264,8 +283,8 @@ const App: React.FC = () => {
     };
 
     const [showActivity, setShowActivity] = useState(false);
-    const openActivity = () => {
-        if (!requireAuth()) return;
+    const openActivity = async () => {
+        if (!(await requireAuthAsync())) return;
         setShowActivity(true);
     }
 

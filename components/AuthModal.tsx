@@ -224,37 +224,44 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
     try {
       const t0 = performance.now();
       // 이메일 확인 정책에 따라 redirect_to를 선택적으로 설정
-      const EMAIL_CONFIRM = String((import.meta as any).env?.VITE_EMAIL_CONFIRM || 'false').toLowerCase() === 'true';
+      const isLocalhost = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)/.test(window.location.hostname);
+      const EMAIL_CONFIRM = !isLocalhost && String((import.meta as any).env?.VITE_EMAIL_CONFIRM || 'false').toLowerCase() === 'true';
       const emailRedirectTo = (import.meta as any).env?.VITE_EMAIL_REDIRECT || window.location.origin;
       const signUpOptions: any = EMAIL_CONFIRM ? { emailRedirectTo } : {};
       signUpOptions.data = { display_name: displayName.trim(), phone: phone.trim() };
 
-      // 1차: 정책에 맞는 옵션으로 시도
-      let { data, error }: any = await withTimeout(supabase.auth.signUp({
-        email,
-        password,
-        options: signUpOptions
-      }));
-      const dt = Math.round(performance.now() - t0);
-      if (DEBUG) console.debug(`[auth] signUp took ${dt}ms`, { error });
-      // 422 (redirect 미허용 등) 시 옵션 없이 재시도
-      if (error && (error.status === 422 || /redirect|url/i.test(error.message || ''))) {
+      // 422 대응: redirect_to 또는 metadata로 인한 거절 가능성을 고려해
+      // 옵션→데이터만→최소 페이로드 순으로 폴백
+      // VITE_SIGNUP_MINIMAL=true인 경우 즉시 최소 페이로드로만 시도(MVP 강제 경량 경로)
+      let data: any = null; let error: any = null;
+      const FORCE_MINIMAL = isLocalhost || String((import.meta as any).env?.VITE_SIGNUP_MINIMAL || 'false').toLowerCase() === 'true';
+      const attempts = FORCE_MINIMAL
+        ? [{ email, password }]
+        : [
+            { email, password, options: signUpOptions },
+            { email, password, options: { data: { display_name: displayName.trim(), phone: phone.trim() } } },
+            { email, password }
+          ];
+      for (const payload of attempts) {
         try {
-          const retry = await withTimeout(supabase.auth.signUp({ email, password, options: { data: { display_name: displayName.trim(), phone: phone.trim() } } }));
-          data = retry.data;
-          error = retry.error;
-          if (DEBUG) console.debug('[auth] signUp retry without redirect_to', { error });
-        } catch (re) {
-          error = re;
+          const res: any = await withTimeout(supabase.auth.signUp(payload as any));
+          data = res.data; error = res.error;
+          if (!error) break;
+          // 422 or redirect 관련이면 다음 시도
+          if (!(error.status === 422 || /redirect|url/i.test(error.message || ''))) break;
+        } catch (e: any) {
+          error = e;
         }
       }
+      const dt = Math.round(performance.now() - t0);
+      if (DEBUG) console.debug(`[auth] signUp took ${dt}ms`, { error });
 
       if (error) {
         const msg = error.message || '';
         if (/Signups not allowed/i.test(msg)) {
           setError('이메일 가입이 비활성화되어 있습니다. Supabase Auth 설정에서 Email provider를 활성화해 주세요.');
         } else if (/redirect|url/i.test(msg) || error.status === 422) {
-          setError('리다이렉트 URL이 허용되지 않았습니다. Supabase Auth → URL configuration에서 현재 도메인을 허용 목록에 추가해 주세요.');
+          setError('가입 요청이 거절되었습니다(422). URL 허용/보안 설정을 확인해 주세요. 개발환경에서는 VITE_SIGNUP_MINIMAL=true 또는 Email Confirm Off를 권장합니다.');
         } else if (/password/i.test(msg) && /6/i.test(msg)) {
           setError('비밀번호는 6자 이상이어야 합니다.');
         } else if (/rate/i.test(msg)) {
