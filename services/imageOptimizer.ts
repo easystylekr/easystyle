@@ -254,9 +254,9 @@ export async function progressiveOptimization(
   onProgress?: (stage: string, progress: number) => void
 ): Promise<OptimizedImageResult> {
   const stages = [
-    { name: '이미지 분석 중...', maxDim: 2048, quality: 0.9 },
-    { name: '1차 최적화 중...', maxDim: 1600, quality: 0.85 },
-    { name: '최종 최적화 중...', maxDim: 1200, quality: 0.8 }
+    { name: '이미지 분석 중...', maxDim: 1600, quality: 0.85 },
+    { name: '1차 최적화 중...', maxDim: 1024, quality: 0.75 },
+    { name: '최종 최적화 중...', maxDim: 800, quality: 0.7 }
   ];
 
   let result: OptimizedImageResult | null = null;
@@ -300,7 +300,7 @@ export async function createFastPreview(
     const result = await optimizeImage(dataUrl, {
       maxWidth: maxDim,
       maxHeight: maxDim,
-      quality: 0.7,
+      quality: 0.6,
       format: 'jpeg'
     });
     return `data:image/jpeg;base64,${result.base64}`;

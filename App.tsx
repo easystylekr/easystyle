@@ -291,7 +291,7 @@ const App: React.FC = () => {
             let processedBase64 = optimizedResult.base64;
             let processedMime = 'image/jpeg';
 
-            setLoadingMessage('AI가 당신의 스타일을 만들고 있어요... (최대 80초 소요)');
+            setLoadingMessage('AI가 당신의 스타일을 만들고 있어요... (최대 30초, 실패 시 자동 폴백)');
             const aiStartTime = performance.now();
             console.log('🤖 [executeStyleGeneration] Starting AI style generation...', {
                 processedImageSize: processedBase64.length,
@@ -303,7 +303,7 @@ const App: React.FC = () => {
             try {
                 ({ styledImageBase64, description } = await withTimeout(
                     generateStyle(processedBase64, processedMime, finalPrompt),
-                    80000  // 80초로 연장
+                    30000  // 30초로 단축하여 빠른 폴백
                 ));
 
                 aiEndTime = performance.now();
@@ -347,7 +347,7 @@ const App: React.FC = () => {
 
                     ({ styledImageBase64, description } = await withTimeout(
                         generateStyle(processedBase64, processedMime, finalPrompt),
-                        60000  // 60초로 연장
+                        45000  // 45초로 조정
                     ));
 
                     const retryAiEndTime = performance.now();
