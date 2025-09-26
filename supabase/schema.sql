@@ -3,8 +3,8 @@
 create extension if not exists pgcrypto;
 
 -- helper: check admin role
-drop function if exists public.is_admin(uuid);
-create function public.is_admin(uid uuid)
+-- Use CREATE OR REPLACE to avoid dropping dependencies (policies)
+create or replace function public.is_admin(uid uuid)
 returns boolean
 language sql
 security definer
@@ -69,6 +69,10 @@ create table if not exists public.style_requests (
   created_at timestamptz not null default now()
 );
 
+-- Query performance: list by user and recent first
+create index if not exists idx_style_requests_user_created_at
+  on public.style_requests (user_id, created_at desc);
+
 alter table public.style_requests enable row level security;
 drop policy if exists "style_requests_user_rw" on public.style_requests;
 create policy "style_requests_user_rw" on public.style_requests
@@ -84,6 +88,9 @@ create table if not exists public.purchase_requests (
   admin_notes text,
   created_at timestamptz not null default now()
 );
+
+create index if not exists idx_purchase_requests_user_created_at
+  on public.purchase_requests (user_id, created_at desc);
 
 alter table public.purchase_requests enable row level security;
 -- auth_events: 로그인/로그아웃/가입 이벤트 로그 (관리용)
