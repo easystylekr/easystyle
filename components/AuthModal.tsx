@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/services/supabaseClient';
+import { logAuthEvent } from '@/services/authLog';
 
 type Props = {
   open: boolean;
@@ -20,6 +21,10 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
   const AUTH_TIMEOUT_MS = 30000; // 30초 타임아웃으로 증가
 
   const DEBUG = Boolean((import.meta as any).env?.VITE_AUTH_DEBUG);
+  const [displayName, setDisplayName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL as string | undefined;
   const SUPABASE_ANON = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string | undefined;
 
@@ -44,6 +49,13 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
       setMode(defaultMode);
     }
   }, [open, defaultMode]);
+
+  // 회원가입 탭 진입 시, 이름에 샘플 값을 한 번만 채워 사용자에게 예시를 제공합니다.
+  useEffect(() => {
+    if (open && mode === 'signup' && !displayName) {
+      setDisplayName('홍길동');
+    }
+  }, [open, mode]);
 
   // 세션 변경을 항상 감지하여, 실제로 로그인된 상태가 되면 모달을 자동으로 닫습니다.
   useEffect(() => {
@@ -211,17 +223,38 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
     setInfo(null);
     try {
       const t0 = performance.now();
-      const { data, error }: any = await withTimeout(supabase.auth.signUp({
+      // 이메일 확인 정책에 따라 redirect_to를 선택적으로 설정
+      const EMAIL_CONFIRM = String((import.meta as any).env?.VITE_EMAIL_CONFIRM || 'false').toLowerCase() === 'true';
+      const emailRedirectTo = (import.meta as any).env?.VITE_EMAIL_REDIRECT || window.location.origin;
+      const signUpOptions: any = EMAIL_CONFIRM ? { emailRedirectTo } : {};
+      signUpOptions.data = { display_name: displayName.trim(), phone: phone.trim() };
+
+      // 1차: 정책에 맞는 옵션으로 시도
+      let { data, error }: any = await withTimeout(supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: window.location.origin }
+        options: signUpOptions
       }));
       const dt = Math.round(performance.now() - t0);
       if (DEBUG) console.debug(`[auth] signUp took ${dt}ms`, { error });
+      // 422 (redirect 미허용 등) 시 옵션 없이 재시도
+      if (error && (error.status === 422 || /redirect|url/i.test(error.message || ''))) {
+        try {
+          const retry = await withTimeout(supabase.auth.signUp({ email, password, options: { data: { display_name: displayName.trim(), phone: phone.trim() } } }));
+          data = retry.data;
+          error = retry.error;
+          if (DEBUG) console.debug('[auth] signUp retry without redirect_to', { error });
+        } catch (re) {
+          error = re;
+        }
+      }
+
       if (error) {
         const msg = error.message || '';
         if (/Signups not allowed/i.test(msg)) {
           setError('이메일 가입이 비활성화되어 있습니다. Supabase Auth 설정에서 Email provider를 활성화해 주세요.');
+        } else if (/redirect|url/i.test(msg) || error.status === 422) {
+          setError('리다이렉트 URL이 허용되지 않았습니다. Supabase Auth → URL configuration에서 현재 도메인을 허용 목록에 추가해 주세요.');
         } else if (/password/i.test(msg) && /6/i.test(msg)) {
           setError('비밀번호는 6자 이상이어야 합니다.');
         } else if (/rate/i.test(msg)) {
@@ -234,10 +267,23 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
         return;
       }
       if (!data?.session) {
-        setInfo('회원가입이 완료되었습니다. 이메일로 전송된 확인 링크를 눌러 로그인해 주세요.');
-        return;
+        // MVP: 이메일 확인이 켜져 있어도 즉시 로그인 시도
+        const { error: loginErr } = await withTimeout(
+          supabase.auth.signInWithPassword({ email, password })
+        );
+        if (loginErr) {
+          const lower = (loginErr.message || '').toLowerCase();
+          if (lower.includes('confirm')) {
+            setInfo('회원가입이 완료되었습니다. 이메일 확인이 필요합니다. (MVP에서는 Email Confirm을 Off로 설정하면 즉시 로그인됩니다)');
+          } else {
+            setError(loginErr.message || '자동 로그인에 실패했습니다. 로그인 버튼으로 시도해 주세요.');
+          }
+          return;
+        }
       }
-      onClose();
+      // 성공적으로 로그인되면 모달 닫기
+      setLoadingMessage('로그인 완료!');
+      setTimeout(() => onClose(), 400);
     } catch (e: any) {
       if (DEBUG) console.warn('signup failed:', e);
       if (e?.message === 'timeout') {
@@ -291,7 +337,10 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
     setInfo(null);
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
     setPending(false);
-    if (error) setError(error.message); else setInfo('비밀번호 재설정 링크를 이메일로 전송했습니다.');
+    if (error) setError(error.message); else {
+      try { await logAuthEvent('reset'); } catch {}
+      setInfo('비밀번호 재설정 링크를 이메일로 전송했습니다.');
+    }
   };
 
 
@@ -303,9 +352,28 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
       setError('유효한 이메일 주소를 입력해 주세요.');
       return false;
     }
-    if (current === 'signup' && password.length < 6) {
-      setError('비밀번호는 6자 이상이어야 합니다.');
-      return false;
+    if (current === 'signup') {
+      if (password.length < 6) {
+        setError('비밀번호는 6자 이상이어야 합니다.');
+        return false;
+      }
+      if (!displayName.trim()) {
+        setError('이름을 입력해 주세요.');
+        return false;
+      }
+      const phoneOk = /^[0-9\-+\s]{9,}$/.test(phone.trim());
+      if (!phoneOk) {
+        setError('유효한 휴대폰 번호를 입력해 주세요.');
+        return false;
+      }
+      if (confirmPassword.trim().length === 0) {
+        setError('비밀번호 확인을 입력해 주세요.');
+        return false;
+      }
+      if (password !== confirmPassword) {
+        setError('비밀번호가 일치하지 않습니다.');
+        return false;
+      }
     }
     if (current === 'login' && password.length === 0) {
       setError('비밀번호를 입력해 주세요.');
@@ -328,6 +396,24 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
           <button onClick={() => setMode('signup')} className={`px-3 py-1 rounded-md text-sm ${mode==='signup' ? 'bg-amber-400 text-slate-900' : 'bg-slate-700 text-slate-300'}`}>회원가입</button>
       </div>
         <div className="space-y-3">
+          {mode === 'signup' && (
+            <>
+              <input
+                type="text"
+                placeholder="이름 (예: 홍길동)"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                className="w-full rounded-lg bg-slate-700 p-2 text-slate-100 placeholder-slate-400 border-2 border-slate-600 focus:border-amber-400"
+              />
+              <input
+                type="tel"
+                placeholder="휴대폰 번호"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="w-full rounded-lg bg-slate-700 p-2 text-slate-100 placeholder-slate-400 border-2 border-slate-600 focus:border-amber-400"
+              />
+            </>
+          )}
           <input
             type="email"
             placeholder="이메일"
@@ -336,12 +422,31 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
             className="w-full rounded-lg bg-slate-700 p-2 text-slate-100 placeholder-slate-400 border-2 border-slate-600 focus:border-amber-400"
           />
           <input
-            type="password"
+            type={showPassword ? 'text' : 'password'}
             placeholder="비밀번호"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="w-full rounded-lg bg-slate-700 p-2 text-slate-100 placeholder-slate-400 border-2 border-slate-600 focus:border-amber-400"
           />
+          {mode === 'signup' && (
+            <>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                placeholder="비밀번호 확인"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full rounded-lg bg-slate-700 p-2 text-slate-100 placeholder-slate-400 border-2 border-slate-600 focus:border-amber-400"
+              />
+              {confirmPassword && password !== confirmPassword && (
+                <p className="text-red-400 text-xs">비밀번호가 일치하지 않습니다.</p>
+              )}
+            </>
+          )}
+          <div className="text-right text-xs">
+            <button type="button" onClick={() => setShowPassword(s => !s)} className="underline text-slate-400 hover:text-slate-200">
+              {showPassword ? '비밀번호 숨기기' : '비밀번호 표시'}
+            </button>
+          </div>
           {error && <p className="text-red-400 text-sm">{error}</p>}
           {info && <p className="text-amber-300 text-sm">{info}</p>}
           {!navigator.onLine && (
@@ -349,7 +454,9 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
           )}
           <button
             onClick={mode === 'login' ? handleLogin : handleSignup}
-            disabled={loading || !email || !password}
+            disabled={
+              loading || !email || !password || (mode === 'signup' && (!displayName.trim() || !phone.trim() || !confirmPassword || password !== confirmPassword))
+            }
             className="w-full rounded-lg bg-amber-400 py-2 font-bold text-slate-900 hover:bg-amber-300 disabled:bg-slate-600"
           >
             {loading ? (loadingMessage || '처리 중...') : (mode === 'login' ? '로그인' : '회원가입')}

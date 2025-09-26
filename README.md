@@ -48,13 +48,15 @@ View your app in AI Studio: https://ai.studio/apps/drive/18B6H8V0k66sL9dtdWLakey
    - URL 설정: Site URL 또는 Additional Redirect URLs에 현재 도메인(예: `http://localhost:5173`)을 포함해야 확인 메일 링크가 정상 동작합니다.
 
 ### 로그인/회원가입 UX
-- 이메일/비밀번호: 최소 6자, 유효한 이메일 형식 필요.
-- 이메일 확인(옵션): 회원가입 후 세션이 없으면 확인 메일 안내 표시. "확인 이메일 재전송" 버튼 제공.
+- 이메일/비밀번호/이름/휴대폰: 비밀번호 6자 이상, 유효한 이메일/휴대폰 형식 필요.
+ - 이메일 확인(옵션): 회원가입 직후 자동 로그인을 시도합니다. Confirm email이 On이면 자동 로그인에 실패할 수 있으며, 이 경우 확인 메일 안내를 표시합니다. MVP에서는 Confirm email Off 설정을 권장합니다.
+ - 422(Unprocessable) 대처: redirect_to 허용 URL 문제일 수 있습니다. Supabase Auth → URL configuration에서 Site URL 또는 Additional Redirect URLs에 현재 도메인(예: `http://localhost:5173`)을 추가하세요. `.env`에서 `VITE_EMAIL_CONFIRM=true` + `VITE_EMAIL_REDIRECT=<허용된 URL>`을 사용하면 명시적으로 설정됩니다.
 - 비밀번호 재설정: 이메일 입력 후 "비밀번호 재설정" 버튼으로 메일 전송(redirect: 현재 도메인).
 - 가입 확인 메일 리다이렉트: 코드에서 `emailRedirectTo = window.location.origin`을 사용합니다. Supabase URL 설정의 Site URL 또는 Additional Redirect URLs에 현재 도메인이 포함되어야 합니다.
 - 네트워크 안정성: 회원가입/로그인 요청은 15초 타임아웃을 적용합니다. 지연될 경우 사용자에게 안내하고 버튼 상태를 복구합니다.
  - 로그아웃 안정성: 로그아웃 시 Supabase 세션 이벤트 지연에 대비해 로컬/세션 스토리지의 `sb-*-auth-token` 등 관련 키를 정리하고 UI를 즉시 업데이트합니다.
- - 로그아웃 문제 해결: 드물게 세션이 남는 경우가 있어, `local → global` 순으로 signOut을 시도하고 마지막에 페이지를 새로고침하여 정합성을 보장합니다.
+- 로그아웃 문제 해결: 드물게 세션이 남는 경우가 있어, `local → global` 순으로 signOut을 시도하고 마지막에 페이지를 새로고침하여 정합성을 보장합니다.
+ - 로그아웃 체감 속도: 즉시 UI를 로그아웃 상태로 전환하고, 백그라운드에서 토큰 제거/세션 정리를 수행합니다. `VITE_LOGOUT_TIMEOUT_MS`로 네트워크 정리 타임아웃을 조정할 수 있습니다.
 
 ## Deploy (Vercel)
 
@@ -114,7 +116,7 @@ View your app in AI Studio: https://ai.studio/apps/drive/18B6H8V0k66sL9dtdWLakey
 다음 테이블을 사용합니다. `supabase/schema.sql`을 Supabase SQL Editor에서 실행해 생성하세요.
 주의: PostgreSQL의 `CREATE POLICY`에는 `IF NOT EXISTS`가 없어, 스크립트는 안전하게 기존 정책을 `DROP POLICY IF EXISTS` 후 재생성합니다. 이미 테이블이 있어도 그대로 실행해도 됩니다.
 
-- `profiles`(auth.users 미러): id, email(unique), display_name, role(user/admin), status, last_login_at, created/updated
+- `profiles`(auth.users 미러): id, email(unique), display_name, phone, role(user/admin), status, last_login_at, created/updated
 - `auth_events`: 로그인/로그아웃/가입/재설정 이벤트 로그(user_agent, created_at). 사용자 본인은 자신의 이벤트만 조회 가능
 - `style_requests`: 프런트엔드 스타일 요청 로그(prompt, model_provider, created_at)
 - `purchase_requests`: 구매 요청(items JSON, total_krw, status, admin_notes, created_at)

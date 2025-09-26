@@ -7,6 +7,7 @@ import Spinner from './components/Spinner';
 import ProductCard from './components/ProductCard';
 import { CameraIcon, GalleryIcon, SparklesIcon } from './components/icons';
 import AuthModal from './components/AuthModal';
+import AdminPage from './components/AdminPage';
 import { supabase } from './services/supabaseClient';
 import { upsertProfileFromSession } from './services/profile';
 import ActivityModal from './components/ActivityModal';
@@ -17,6 +18,10 @@ type AIQuestion = {
 };
 
 const App: React.FC = () => {
+    // Simple path switch (no router): /admin renders AdminPage
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
+      return <AdminPage/>;
+    }
     const [screen, setScreen] = useState<AppScreen>(AppScreen.Home);
     const [originalImage, setOriginalImage] = useState<{ base64: string; mimeType: string; url: string } | null>(null);
     const [prompt, setPrompt] = useState('');
@@ -35,13 +40,28 @@ const App: React.FC = () => {
     const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
     const [userEmail, setUserEmail] = useState<string | null>(null);
     
+    const suppressAuthEventsRef = React.useRef(false);
+
     React.useEffect(() => {
         supabase.auth.getUser().then(async ({ data }) => {
             setUserEmail(data.user?.email ?? null);
+            // 로그인 상태면 혹시 남아있을 수 있는 로그아웃 표시를 해제
+            if (data.user) {
+                setLoggingOut(false);
+            }
             if (data.user) await upsertProfileFromSession();
         });
         const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+            // 로그아웃 진행 중에는 이벤트를 일시 무시하여 UI가 다시 로그인 상태로 보이지 않게 함
+            if (suppressAuthEventsRef.current) {
+                if (event === 'SIGNED_OUT') suppressAuthEventsRef.current = false;
+                return;
+            }
             setUserEmail(session?.user?.email ?? null);
+            if (event === 'SIGNED_IN') {
+                // 방어적으로 로그아웃 진행 UI를 해제
+                setLoggingOut(false);
+            }
             if (session?.user) await upsertProfileFromSession();
             // 이벤트 로깅 (login/logout)
             try {
@@ -79,7 +99,23 @@ const App: React.FC = () => {
     }, [selectedProducts]);
 
 
+    const requireAuth = () => {
+        if (!userEmail) {
+            setAuthMode('login');
+            setShowAuth(true);
+            setError('이 기능을 사용하려면 로그인이 필요합니다.');
+            return false;
+        }
+        return true;
+    };
+
+    const openFilePicker = () => {
+        if (!requireAuth()) return;
+        fileInputRef.current?.click();
+    };
+
     const handleImageSelect = (file: File) => {
+        if (!requireAuth()) return;
         if (!file) return;
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -129,6 +165,16 @@ const App: React.FC = () => {
         }
     };
 
+    // 비로그인 상태에서 보호된 화면에 머물지 않도록 자동 복귀 및 로그인 유도
+    React.useEffect(() => {
+        if (!userEmail && (screen === AppScreen.Styling || screen === AppScreen.Result)) {
+            reset();
+            setAuthMode('login');
+            setShowAuth(true);
+            setError('로그인이 필요합니다. 로그인 후 이용해 주세요.');
+        }
+    }, [userEmail, screen]);
+
     const executeStyleGeneration = async (finalPrompt: string) => {
         if (!originalImage) return;
         setIsLoading(true);
@@ -172,6 +218,7 @@ const App: React.FC = () => {
 
     // Fix: Restructured the conditional to ensure TypeScript correctly narrows the type of `validationResult`.
     const handleInitialStyleRequest = async () => {
+        if (!requireAuth()) return;
         setAiQuestion(null);
         setError(null);
         setIsLoading(true);
@@ -188,6 +235,7 @@ const App: React.FC = () => {
     };
     
     const handleAnswerSubmit = async () => {
+        if (!requireAuth()) return;
         const fullPrompt = `${prompt}\n\n추가 정보: ${userAnswer}`;
         await executeStyleGeneration(fullPrompt);
     };
@@ -216,8 +264,13 @@ const App: React.FC = () => {
     };
 
     const [showActivity, setShowActivity] = useState(false);
+    const openActivity = () => {
+        if (!requireAuth()) return;
+        setShowActivity(true);
+    }
 
     const AUTH_DEBUG = Boolean((import.meta as any).env?.VITE_AUTH_DEBUG);
+    const LOGOUT_TIMEOUT = Number((import.meta as any).env?.VITE_LOGOUT_TIMEOUT_MS) || 3000;
     const [loggingOut, setLoggingOut] = useState(false);
 
     const clearSupabaseStorage = () => {
@@ -234,32 +287,40 @@ const App: React.FC = () => {
         }
     };
 
+    const withTimeout = async <T,>(p: Promise<T>, ms = LOGOUT_TIMEOUT): Promise<T> => {
+        return await Promise.race([
+            p,
+            new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)) as Promise<T>,
+        ]);
+    };
+
     const handleLogout = async () => {
         if (loggingOut) return;
+        // 0) 즉시 UI 반영 및 토큰 제거 (사용자 체감 지연 제거)
         setLoggingOut(true);
-        try {
-            // 1차: local scope
-            try { await (supabase as any).auth.signOut({ scope: 'local' }); } catch (e) { if (AUTH_DEBUG) console.warn('local signOut error', e); }
-            clearSupabaseStorage();
-            await new Promise(r => setTimeout(r, 200));
-            let { data } = await supabase.auth.getUser();
-            if (data.user) {
-                // 2차: global scope (다른 탭 세션 포함)
-                try { await (supabase as any).auth.signOut({ scope: 'global' }); } catch (e) { if (AUTH_DEBUG) console.warn('global signOut error', e); }
+        suppressAuthEventsRef.current = true;
+        // 이벤트 억제 플래그가 영구히 남지 않도록 안전 타이머로 해제
+        setTimeout(() => { suppressAuthEventsRef.current = false; }, 1500);
+        clearSupabaseStorage();
+        setUserEmail(null);
+        setTimeout(() => setLoggingOut(false), 300); // 짧은 진행 표시만 노출
+
+        // 1) 백그라운드 정리: 타임아웃을 적용하여 지연 방지
+        (async () => {
+            try {
+                // 단일 호출: global scope만 시도 (네트워크 지연 시에도 시도는 하되 실패해도 무시)
+                try { await withTimeout((supabase as any).auth.signOut({ scope: 'global' })); } catch (e) { /* silent in production */ if (AUTH_DEBUG) console.debug('signOut (debug):', e); }
                 clearSupabaseStorage();
-                await new Promise(r => setTimeout(r, 200));
-                ({ data } = await supabase.auth.getUser());
+            } finally {
+                // 최후 수단: 여전히 세션이 남아있다면 리로드로 정합성 확보(비차단, 약간 지연 후)
+                setTimeout(async () => {
+                    try {
+                        const { data } = await supabase.auth.getUser();
+                        if (data.user) window.location.href = '/';
+                    } catch {}
+                }, 500);
             }
-            // UI 즉시 반영
-            setUserEmail(null);
-            // 최후 수단: 세션이 남아 있다면 새로고침으로 정합성 회복
-            if (data.user) {
-                if (AUTH_DEBUG) console.warn('Session still present after signOut attempts; forcing reload');
-                window.location.href = '/';
-            }
-        } finally {
-            setLoggingOut(false);
-        }
+        })();
     };
 
     const renderHome = () => (
@@ -268,11 +329,11 @@ const App: React.FC = () => {
                 <h1 className="text-3xl font-bold text-slate-100">당신의 전문 스타일리스트</h1>
                 <p className="text-slate-400 mt-2 mb-8">사진 한 장으로 나만의 스타일을 찾아보세요.</p>
                 <div className="space-y-4">
-                    <button onClick={() => fileInputRef.current?.click()} className="w-full bg-slate-700 text-slate-200 font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-slate-600 transition-colors duration-300">
+                    <button onClick={openFilePicker} className="w-full bg-slate-700 text-slate-200 font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-slate-600 transition-colors duration-300">
                         <CameraIcon className="w-6 h-6" />
                         사진 찍기
                     </button>
-                    <button onClick={() => fileInputRef.current?.click()} className="w-full bg-amber-400 text-slate-900 font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-amber-300 transition-colors duration-300 shadow-lg">
+                    <button onClick={openFilePicker} className="w-full bg-amber-400 text-slate-900 font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-amber-300 transition-colors duration-300 shadow-lg">
                         <GalleryIcon className="w-6 h-6" />
                         갤러리에서 선택
                     </button>
@@ -287,7 +348,7 @@ const App: React.FC = () => {
                       <div className="w-px h-4 bg-slate-600"></div>
                       <button onClick={handleLogout} disabled={loggingOut} className="text-slate-400 hover:text-slate-200 transition-colors text-sm font-medium disabled:opacity-60">{loggingOut ? '로그아웃 중...' : '로그아웃'}</button>
                       <div className="w-px h-4 bg-slate-600"></div>
-                      <button onClick={() => setShowActivity(true)} className="text-slate-400 hover:text-slate-200 transition-colors text-sm font-medium">내 활동</button>
+                      <button onClick={openActivity} className="text-slate-400 hover:text-slate-200 transition-colors text-sm font-medium">내 활동</button>
                     </>
                 ) : (
                     <>
@@ -319,13 +380,13 @@ const App: React.FC = () => {
                             ))}
                         </div>
                         <textarea value={userAnswer} onChange={(e) => setUserAnswer(e.target.value)} placeholder="답변을 입력해주세요..." className="w-full mt-3 bg-slate-700 border-2 border-slate-600 rounded-lg p-2 text-slate-100 text-sm" rows={2} />
-                        <button onClick={handleAnswerSubmit} disabled={isLoading || !userAnswer} className="w-full mt-3 bg-amber-400 text-slate-900 font-bold py-2 px-4 text-sm rounded-lg hover:bg-amber-300 disabled:bg-slate-600">답변 제출</button>
+                        <button onClick={handleAnswerSubmit} disabled={isLoading || !userAnswer || !userEmail} className="w-full mt-3 bg-amber-400 text-slate-900 font-bold py-2 px-4 text-sm rounded-lg hover:bg-amber-300 disabled:bg-slate-600">답변 제출</button>
                     </div>
                 )}
                  {error && <p className="text-red-400 mt-4 text-sm">{error}</p>}
             </div>
             {!aiQuestion && (
-                <button onClick={handleInitialStyleRequest} disabled={isLoading || !prompt} className="w-full mt-6 bg-amber-400 text-slate-900 font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-amber-300 transition-colors duration-300 shadow-lg disabled:bg-slate-600 disabled:text-slate-400 disabled:cursor-not-allowed">
+                <button onClick={handleInitialStyleRequest} disabled={isLoading || !prompt || !userEmail} className="w-full mt-6 bg-amber-400 text-slate-900 font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-amber-300 transition-colors duration-300 shadow-lg disabled:bg-slate-600 disabled:text-slate-400 disabled:cursor-not-allowed">
                     <SparklesIcon className="w-6 h-6" />
                     스타일 생성하기
                 </button>

@@ -1,7 +1,6 @@
-import type { VercelRequest, VercelResponse } from 'vercel';
 import { requireAdmin } from './_client';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   const auth = await requireAdmin(req as any);
   if (!auth.ok) return res.status(auth.status).json(auth.json);
   const supabase = auth.supabase;
@@ -59,4 +58,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: e?.message || 'server_error' });
   }
 }
-

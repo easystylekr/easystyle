@@ -20,12 +20,23 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   email text not null unique,
   display_name text,
+  phone text,
   role text not null default 'user' check (role in ('user','admin')),
   status text not null default 'active' check (status in ('active','inactive','banned')),
   last_login_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Ensure new columns exist when running against an existing DB
+do $$ begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'phone'
+  ) then
+    alter table public.profiles add column phone text;
+  end if;
+end $$;
 
 alter table public.profiles enable row level security;
 

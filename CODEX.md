@@ -18,6 +18,16 @@ This file tracks development progress in near real time. Add an entry for every 
 
 ---
 
+## [2025-09-25 14:55 UTC] Admin UI + Server API + RLS(admin)
+- Scope: 관리자 전용 리스트뷰(/admin) 추가 — profiles/auth_events/purchase_requests/search_jobs 조회/필터/상태 변경. Vercel Serverless Functions로 관리자 API 구현, RLS에 admin 정책 확장. 회원가입/비밀번호 재설정 시 `auth_events` 로깅 보강.
+- Links: PRODUCT_SEARCH_PLAN Week 2(Admin), DEVELOPMENT_CHECKLIST Admin API/UI, PRD §3 구매 대행
+- Files: `components/AdminPage.tsx`, `services/adminApi.ts`, `api/admin/{me,list,update}.ts`, `supabase/schema.sql`(admin 정책 보강), `components/AuthModal.tsx`(signup/reset 로깅)
+- Notes:
+  - 배포 환경 변수: `SUPABASE_SERVICE_ROLE_KEY`(Serverless에서만 사용), `VITE_SUPABASE_URL` 필수.
+  - 접근 제어: Bearer 토큰(`supabase.auth.getSession().access_token`)을 `Authorization` 헤더로 전송 → 서버에서 `profiles.role='admin'` 확인.
+  - RLS: profiles(admin update 허용), purchase_requests(all), search_jobs(update 허용), auth_events(select) 확장.
+  - 검증: 회원가입 성공 시 `auth_events: 'signup'` 기록, 비밀번호 재설정 요청 시 `'reset'` 기록. 이메일 확인 후 로그인 이벤트는 기존 `SIGNED_IN → 'login'` 로깅으로 확인 가능.
+
 ## [2025-09-25 01:15 UTC] Supabase auth modal + session wiring
 - Scope: Email/Password 로그인·회원가입 모달 추가, 세션 표시/로그아웃, 초기 세션 구독
 - Links: PRD §1.1 Auth; Plan Week 3; Checklist: "프론트엔드 인증 시스템"
@@ -260,3 +270,48 @@ This file tracks development progress in near real time. Add an entry for every 
 - Links: PRD §1, §3; Admin UX/데이터 운영
 - Files: `supabase/schema.sql`, `README.md`
 - Notes: 운영에서 서비스키 없이도 admin 사용자로 로그인 시 관리자 조회가 가능하도록 정책 구성
+## [2025-09-25 07:55 UTC] 로그아웃 즉시 UI 전환 + 비차단 백그라운드 정리
+- Scope: 로그아웃 시 즉시 UI를 로그아웃 상태로 전환하고, signOut(local→global)과 세션 확인을 타임아웃(기본 3s)으로 백그라운드 처리
+- Links: UX 성능 개선; 환경변수 `VITE_LOGOUT_TIMEOUT_MS`
+- Files: `App.tsx`, `.env.example`, `README.md`
+- Notes: 느린 네트워크에서도 체감 지연을 제거. 세션 잔존 시 자동 리로드로 정합성 유지.
+## [2025-09-25 08:10 UTC] 로그아웃 이벤트 재진입 방지(suppress auth events)
+- Scope: 로그아웃 동안 `onAuthStateChange` 이벤트를 일시 무시하는 플래그를 추가해, 지연되는 세션 이벤트로 UI가 다시 로그인 상태로 보이는 이슈 방지
+- Links: UX 안정화
+- Files: `App.tsx`
+- Notes: SIGNED_OUT 수신 시 플래그 해제. 남은 세션은 백그라운드 정리/리로드 경로 유지.
+## [2025-09-25 08:20 UTC] 로그인 시 로그아웃 상태 라벨 해제
+- Scope: `SIGNED_IN` 이벤트 및 초기 세션 확인 시 `loggingOut`을 강제로 false로 설정해 "로그아웃 중..." 라벨이 남는 이슈 해결
+- Links: UX 안정화
+- Files: `App.tsx`
+- Notes: 로그인 완료 후 버튼 라벨이 즉시 정상화되도록 방어 처리 추가
+## [2025-09-25 08:30 UTC] 회원가입 직후 자동 로그인(MVP)
+- Scope: signUp 성공 후 세션이 없더라도 `signInWithPassword`로 즉시 로그인 시도. 실패 시에만 이메일 확인 안내를 노출
+- Links: PRD §1.1; MVP 요구
+- Files: `components/AuthModal.tsx`, `README.md`
+- Notes: 운영에서는 Confirm email On 권장이나, MVP 요구에 따라 Off 시 즉시 로그인됨
+## [2025-09-25 08:40 UTC] 로그아웃 타임아웃 콘솔 경고 억제 + 단일 global signOut로 단순화
+- Scope: local→global 2회 호출을 제거하고 global 한 번만 시도(타임아웃/에러는 DEBUG에서만 로깅); 불필요한 콘솔 경고 방지
+- Links: UX 안정화 / 콘솔 노이즈 감소
+- Files: `App.tsx`
+- Notes: UI는 즉시 로그아웃 상태로 전환하며, 세션 잔존 시 지연 후 자동 리로드로 정합성 확보
+## [2025-09-25 08:45 UTC] 422(redirect_to) 대응: signUp 재시도 및 env 스위치
+- Scope: signUp에서 422/redirect 에러 시 옵션 없이 재시도; `.env`로 이메일 확인/리다이렉트 제어(`VITE_EMAIL_CONFIRM`, `VITE_EMAIL_REDIRECT`). README에 422 가이드 추가
+- Links: PRD §1.1; Supabase Auth URL 설정
+- Files: `components/AuthModal.tsx`, `.env.example`, `README.md`
+- Notes: URL configuration에 현재 도메인을 허용해야 함. MVP에서는 Confirm email Off로 즉시 로그인 권장
+## [2025-09-25 09:00 UTC] 인증 게이트 추가: 비로그인 시 로그인/회원가입 유도
+- Scope: 이미지 선택/스타일 생성/추가 답변/내 활동 열기 등 주요 액션에 `requireAuth()` 적용. 비로그인 시 AuthModal 오픈 및 안내 메시지 표시
+- Links: PRD §1.1; MVP 요구(로그인 상태 확인 후 진행)
+- Files: `App.tsx`
+- Notes: 구매 요청은 기존처럼 로그인 필요. 이제 모든 주요 플로우에서 선 인증을 강제.
+## [2025-09-25 09:15 UTC] 회원가입 정보 확장(이름/휴대폰) + profiles.phone 추가
+- Scope: AuthModal에 이름/휴대폰 입력 추가, Supabase signUp `options.data`로 전송; `profiles` 테이블에 `phone` 컬럼 추가 및 upsert 시 반영
+- Links: PRD §1.1; 데이터 일관성
+- Files: `components/AuthModal.tsx`, `services/profile.ts`, `supabase/schema.sql`, `README.md`
+- Notes: 기존 DB에는 스크립트 실행 시 자동으로 `phone` 컬럼을 추가(존재 검사 후 ALTER)
+## [2025-09-25 09:25 UTC] 회원가입 폼에 이름 샘플 프리필/플레이스홀더 추가
+- Scope: 회원가입 탭 진입 시 `displayName`이 비어 있으면 '홍길동'으로 1회 프리필; 입력란 플레이스홀더를 `이름 (예: 홍길동)`으로 명시
+- Links: UX 개선
+- Files: `components/AuthModal.tsx`
+- Notes: 사용자가 입력을 시작하면 즉시 덮어씌워지며, 기존 입력이 있을 경우 프리필하지 않음
