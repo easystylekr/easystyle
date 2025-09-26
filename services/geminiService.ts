@@ -2,8 +2,13 @@ import { GoogleGenAI, Modality, Type } from "@google/genai";
 import type { Product } from '../types';
 import { ProductCategory } from '../types';
 
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-const DEBUG = Boolean(import.meta.env?.VITE_AUTH_DEBUG === 'true');
+// Prefer Vite env, then Node-style env injected via vite.config.ts
+const apiKey =
+  import.meta.env.VITE_GEMINI_API_KEY ||
+  process.env.GEMINI_API_KEY ||
+  // Fallback alias defined in vite.config.ts
+  (process.env as any).API_KEY;
+const DEBUG = String((import.meta as any).env?.VITE_AI_DEBUG || '').toLowerCase() === 'true';
 
 if (DEBUG) {
   console.log('[geminiService] Initializing with API key present:', !!apiKey);
@@ -37,7 +42,8 @@ export const validatePrompt = async (prompt: string): Promise<{ valid: true } | 
     }
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        // Use stable text-capable model
+        model: 'gemini-2.0-flash',
         contents: `다음 패션 스타일링 요청이 구체적인지 판단해주세요: "${prompt}".
 
         1.  요청이 구체적이라면 (예: 상황, 장소, 원하는 스타일이 명확하다면) **"YES"** 라고만 대답하세요.
@@ -136,8 +142,10 @@ export const generateStyle = async (
 
   let description = '';
   try {
+    const t0 = Date.now();
     const descriptionResponse = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        // Use stable text-capable model
+        model: 'gemini-2.0-flash',
         contents: {
             parts: [
                 imagePart,
@@ -146,6 +154,12 @@ export const generateStyle = async (
         }
     });
     description = descriptionResponse.text.trim();
+    if (DEBUG) {
+      console.log('[geminiService] Description generated', {
+        ms: Date.now() - t0,
+        length: description.length
+      });
+    }
   } catch(error) {
     if (DEBUG) {
       console.error("[geminiService] Style description generation failed:", error);
@@ -193,7 +207,9 @@ export const generateStyle = async (
     try {
       if (DEBUG) console.log(`[geminiService] Image generation attempt ${attempt}/2`);
 
+      const t1 = Date.now();
       const imageResponse = await ai.models.generateContent({
+          // Image preview model supports IMAGE modality output
           model: 'gemini-2.5-flash-image-preview',
           contents: {
               parts: [imagePart, imageGenerationTextPart],
@@ -210,6 +226,13 @@ export const generateStyle = async (
                   break;
               }
           }
+      }
+      if (DEBUG) {
+        console.log('[geminiService] Image response parsed', {
+          ms: Date.now() - t1,
+          hasImage: !!styledImageBase64,
+          candidates: imageResponse.candidates?.length || 0
+        });
       }
 
       // 성공하면 루프 탈출
@@ -303,7 +326,8 @@ export async function detectGender(imageBase64: string, imageMimeType: string): 
 export const getProductsForStyle = async (description: string): Promise<Product[]> => {
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            // Use stable text-capable model
+            model: "gemini-2.0-flash",
             contents: `당신은 한국 패션 시장 전문가입니다. 다음 패션 스타일에 대한 설명을 바탕으로, 현재 **한국 온라인 쇼핑몰(예: Musinsa, 29CM, WConcept, SSF Shop 등)**에서 실제로 판매 중인 상품 5개로 구성된 목록을 만들어주세요.
 
             **스타일 설명:** "${description}"`,
@@ -360,6 +384,7 @@ export const cropImageForProduct = async (
     const textPart = { text: cropPrompt };
 
     const response = await ai.models.generateContent({
+      // Image preview model supports IMAGE modality output
       model: 'gemini-2.5-flash-image-preview',
       contents: {
         parts: [imagePart, textPart],

@@ -3,7 +3,9 @@ import { generateStyle as generateWithGemini } from './geminiService';
 import { generateStyleWithOpenAI, validateOpenAIConfig } from './openaiService';
 import { saveModelUsage, StyleGenerationResult } from './modelTrackingService';
 
-const DEBUG = true; // 타임아웃 디버깅을 위해 임시 활성화
+const DEBUG = String((import.meta as any).env?.VITE_AI_DEBUG || '').toLowerCase() === 'true';
+const FORCE_OPENAI_NANO = String((import.meta as any).env?.VITE_FORCE_OPENAI_NANO || '').toLowerCase() === 'true';
+const ENABLE_NANO_AFTER_OPENAI = String((import.meta as any).env?.VITE_ENABLE_NANO_AFTER_OPENAI || 'true').toLowerCase() === 'true';
 
 export interface AIStyleResult {
   styledImageBase64?: string;
@@ -30,8 +32,43 @@ export const generateStyleWithFallback = async (
       imageSize: imageBase64?.length || 0,
       mimeType: imageMimeType,
       promptLength: prompt?.length || 0,
-      openAIAvailable: validateOpenAIConfig()
+      openAIAvailable: validateOpenAIConfig(),
+      forceOpenAiNano: FORCE_OPENAI_NANO
     });
+  }
+
+  // 강제 폴백: OpenAI(텍스트) + NanoBanana(이미지)
+  if (FORCE_OPENAI_NANO && validateOpenAIConfig()) {
+    if (DEBUG) console.log('[aiStyleService] FORCE_OPENAI_NANO enabled — using OpenAI text + NanoBanana image');
+    try {
+      const fallbackStartTime = Date.now();
+      const openai = await generateStyleWithOpenAI(imageBase64, imageMimeType, prompt);
+      let nanoImage = '';
+      try {
+        const { generateStyle: nanoGenerate } = await import('./nanoBananaModel');
+        const nano = await nanoGenerate(imageBase64, imageMimeType, prompt);
+        nanoImage = nano.styledImageBase64 || '';
+      } catch (e) {
+        if (DEBUG) console.warn('[aiStyleService] NanoBanana image generation failed under FORCE mode:', e);
+      }
+      await saveModelUsage({
+        model_provider: 'openai',
+        model_name: openai.model,
+        prompt_text: prompt,
+        image_size: imageBase64?.length || 0,
+        success: true,
+        response_time_ms: Date.now() - fallbackStartTime,
+      }).catch(() => {});
+
+      return {
+        styledImageBase64: nanoImage,
+        description: openai.description,
+        model: `${openai.model}+nano`,
+        provider: 'openai',
+      };
+    } catch (e) {
+      if (DEBUG) console.warn('[aiStyleService] FORCE_OPENAI_NANO path failed, continuing to normal flow:', e);
+    }
   }
 
   // 1차 시도: Gemini API
@@ -137,10 +174,23 @@ export const generateStyleWithFallback = async (
           });
         }
 
+        // Optionally request image via NanoBanana after OpenAI text
+        let nanoImage = '';
+        if (ENABLE_NANO_AFTER_OPENAI) {
+          try {
+            const { generateStyle: nanoGenerate } = await import('./nanoBananaModel');
+            const nano = await nanoGenerate(imageBase64, imageMimeType, prompt);
+            nanoImage = nano.styledImageBase64 || '';
+            if (DEBUG) console.log('[aiStyleService] NanoBanana image generated after OpenAI text');
+          } catch (e) {
+            if (DEBUG) console.warn('[aiStyleService] NanoBanana image generation failed after OpenAI text:', e);
+          }
+        }
+
         return {
-          styledImageBase64: openaiResult.imageBase64,
+          styledImageBase64: nanoImage || openaiResult.imageBase64, // prefer Nano image when available
           description: openaiResult.description,
-          model: openaiResult.model,
+          model: nanoImage ? `${openaiResult.model}+nano` : openaiResult.model,
           provider: 'openai'
         };
 
@@ -227,7 +277,10 @@ export const getAvailableProviders = (): Array<'gemini' | 'openai'> => {
   const providers: Array<'gemini' | 'openai'> = [];
 
   // Gemini API 키 확인
-  const geminiApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+  const geminiApiKey =
+    (import.meta as any).env?.VITE_GEMINI_API_KEY ||
+    (process as any)?.env?.GEMINI_API_KEY ||
+    (process as any)?.env?.API_KEY;
   if (geminiApiKey && geminiApiKey !== 'dummy-key') {
     providers.push('gemini');
   }

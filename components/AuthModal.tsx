@@ -18,7 +18,7 @@ const AuthModal: React.FC<Props> = ({ open, onClose, defaultMode = 'login' }) =>
   const [pending, setPending] = useState(false);
   const [cooldown, setCooldown] = useState(0); // 재전송 쿨다운(초)
   const [loadingMessage, setLoadingMessage] = useState(''); // 로딩 중 메시지
-  const AUTH_TIMEOUT_MS = 60000; // 60초 타임아웃으로 증가 (네트워크 상황 고려)
+  const AUTH_TIMEOUT_MS = Number((import.meta as any).env?.VITE_AUTH_TIMEOUT_MS) || 60000;
 
   const DEBUG = Boolean((import.meta as any).env?.VITE_AUTH_DEBUG);
   const [displayName, setDisplayName] = useState('');
