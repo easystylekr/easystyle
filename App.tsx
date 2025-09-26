@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { AppScreen, Product, ProductCategory } from './types';
-import { generateStyle, getProductsForStyle, validatePrompt, cropImageForProduct, detectGender } from './services/styleProvider';
+import { generateStyle, getProductsForStyle, validatePrompt, cropImageForProduct } from './services/styleProvider';
 import { recordStyleRequest, recordPurchaseRequest, recordStyleSession } from './services/db';
 import { uploadBase64Image } from './services/storage';
 import Header from './components/Header';
@@ -266,33 +266,13 @@ const App: React.FC = () => {
         setError(null);
         setIsLoading(true);
         setLoadingMessage('스타일 요청을 확인하는 중...');
-        // Step 0: detect gender to avoid mismatched styling
-        try {
-            if (originalImage) {
-                const g = await detectGender(originalImage.base64, originalImage.mimeType);
-                if (g.gender === 'unknown') {
-                    setAiQuestion({ question: '성별을 알려주시면 더 정확한 스타일을 추천드릴 수 있어요.', examples: ['남자', '여자', '상관없음'] });
-                    setIsLoading(false);
-                    return;
-                }
-            }
-        } catch {}
-
         const validationResult = await validatePrompt(prompt);
 
         if (validationResult.valid === false) {
             setAiQuestion({ question: validationResult.question, examples: validationResult.examples });
             setIsLoading(false);
         } else {
-            let genderSuffix = '';
-            try {
-                if (originalImage) {
-                    const g2 = await detectGender(originalImage.base64, originalImage.mimeType);
-                    if (g2.gender === 'male') genderSuffix = '\\n\\n성별: 남자';
-                    else if (g2.gender === 'female') genderSuffix = '\\n\\n성별: 여자';
-                }
-            } catch {}
-            await executeStyleGeneration(`${prompt}${genderSuffix}`, { userPrompt: prompt, userAnswer: '' });
+            await executeStyleGeneration(prompt, { userPrompt: prompt, userAnswer: '' });
         }
     };
     
