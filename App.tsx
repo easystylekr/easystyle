@@ -195,14 +195,67 @@ const App: React.FC = () => {
         }
     }, [userEmail, screen]);
 
+    // Helpers to mitigate large/unsupported images on mobile (e.g., Z Flip)
+    const withTimeout = async <T,>(p: Promise<T>, ms = 20000): Promise<T> => {
+        return await Promise.race([
+            p,
+            new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)) as Promise<T>,
+        ]);
+    };
+
+    const downscaleToJpegBase64 = (dataUrl: string, maxDim: number): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                const { width, height } = img;
+                const scale = Math.min(1, maxDim / Math.max(width, height));
+                const w = Math.max(1, Math.round(width * scale));
+                const h = Math.max(1, Math.round(height * scale));
+                const canvas = document.createElement('canvas');
+                canvas.width = w; canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) { reject(new Error('canvas')); return; }
+                ctx.drawImage(img, 0, 0, w, h);
+                const out = canvas.toDataURL('image/jpeg', 0.85);
+                resolve(out.split(',')[1]);
+            };
+            img.onerror = reject;
+            img.src = dataUrl;
+        });
+    };
+
     const executeStyleGeneration = async (finalPrompt: string, meta?: { userPrompt?: string; userAnswer?: string }) => {
         if (!originalImage) return;
         setIsLoading(true);
         setError(null);
 
         try {
+            // Preprocess image: convert to JPEG and downscale to reduce model latency/errors
+            setLoadingMessage('이미지를 준비하고 있어요...');
+            const srcDataUrl = `data:${originalImage.mimeType};base64,${originalImage.base64}`;
+            let processedBase64 = await downscaleToJpegBase64(srcDataUrl, 1600);
+            let processedMime = 'image/jpeg';
+
             setLoadingMessage('AI가 당신의 스타일을 만들고 있어요...');
-            const { styledImageBase64, description } = await generateStyle(originalImage.base64, originalImage.mimeType, finalPrompt);
+            let styledImageBase64: string, description: string;
+            try {
+                ({ styledImageBase64, description } = await withTimeout(
+                    generateStyle(processedBase64, processedMime, finalPrompt),
+                    20000
+                ));
+            } catch (e) {
+                // Retry once with smaller image if timeout or error
+                try {
+                    setLoadingMessage('이미지를 최적화하는 중...');
+                    processedBase64 = await downscaleToJpegBase64(srcDataUrl, 1024);
+                    ({ styledImageBase64, description } = await withTimeout(
+                        generateStyle(processedBase64, processedMime, finalPrompt),
+                        22000
+                    ));
+                } catch (e2: any) {
+                    throw e2;
+                }
+            }
             setStyledResult({ imageBase64: styledImageBase64, description });
             try {
               const { data: userData } = await supabase.auth.getUser();
@@ -231,27 +284,39 @@ const App: React.FC = () => {
             }
 
             setLoadingMessage('스타일에 맞는 상품을 찾고 있어요...');
-            const productResults = await getProductsForStyle(description);
+            const productResults = await withTimeout(getProductsForStyle(description), 12000).catch(() => []) as Product[];
 
+            // First show products quickly, then attempt limited background crops
+            const limited = (productResults || []).slice(0, Number((import.meta as any).env?.VITE_STYLING_MAX_PRODUCTS) || 8);
+            setProducts(limited);
+            setSelectedProducts(limited);
             setLoadingMessage('상품 이미지를 준비하고 있어요...');
-            const productsWithCroppedImages = await Promise.all(
-                productResults.map(async (product) => {
-                    const croppedBase64 = await cropImageForProduct(
-                        styledImageBase64,
-                        product.category,
-                        product.name
-                    );
-                    return { ...product, croppedImageBase64: croppedBase64 || undefined };
+            const cropLimit = Number((import.meta as any).env?.VITE_STYLING_CROP_LIMIT) || 4;
+            Promise.allSettled(
+                limited.slice(0, cropLimit).map(async (product) => {
+                    const cropped = await cropImageForProduct(styledImageBase64, product.category, product.name);
+                    if (cropped) {
+                        setProducts(prev => prev.map(p => p.productUrl === product.productUrl ? { ...p, croppedImageBase64: cropped } : p));
+                    }
                 })
-            );
-            
-            setProducts(productsWithCroppedImages);
-            setSelectedProducts(productsWithCroppedImages);
+            ).catch(() => {});
 
             setScreen(AppScreen.Result);
         } catch (err: any) {
             console.error(err);
-            setError(err.message || '스타일 생성 중 오류가 발생했습니다.');
+            // Fallback: 텍스트 기반 추천으로 전환하여 사용자 흐름 유지
+            try {
+                setLoadingMessage('이미지 생성이 지연되어 텍스트 기반 추천으로 전환합니다...');
+                const productResults = await withTimeout(getProductsForStyle(finalPrompt), 8000).catch(() => []) as Product[];
+                const limited = (productResults || []).slice(0, Number((import.meta as any).env?.VITE_STYLING_MAX_PRODUCTS) || 8);
+                setStyledResult({ imageBase64: '', description: '텍스트 기반 추천입니다. 이미지 생성이 지연되어도 제품 추천을 제공해드립니다.' });
+                setProducts(limited);
+                setSelectedProducts(limited);
+                setScreen(AppScreen.Result);
+                setError('이미지 생성이 지연되어 텍스트 기반 추천으로 전환했어요.');
+            } catch (e2) {
+                setError((err as any)?.message || '스타일 생성 중 오류가 발생했습니다.');
+            }
         } finally {
             setIsLoading(false);
             setAiQuestion(null);
