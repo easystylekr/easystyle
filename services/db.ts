@@ -1,6 +1,13 @@
 import { supabase } from '@/services/supabaseClient';
 import type { Product } from '@/types';
 
+const withTimeout = async <T,>(p: Promise<T>, ms = 8000): Promise<T> => {
+  return await Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)) as Promise<T>,
+  ]);
+};
+
 export async function recordStyleRequest(prompt: string, provider?: string) {
   const { data } = await supabase.auth.getUser();
   const user = data.user;
@@ -58,26 +65,42 @@ export type PurchaseRequestRow = {
   created_at: string;
 };
 
-export async function listStyleRequests(): Promise<StyleRequestRow[]> {
+export async function listStyleRequests(limit = 50): Promise<StyleRequestRow[]> {
   const { data } = await supabase.auth.getUser();
-  if (!data.user) return [];
+  const user = data.user;
+  if (!user) return [];
   try {
-    const res: any = await (supabase as any).from('style_requests').select('*');
-    const rows: StyleRequestRow[] = res?.data || [];
-    return rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const { data: rows, error } = await withTimeout(
+      (supabase as any)
+        .from('style_requests')
+        .select('id, user_id, prompt, model_provider, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(limit)
+    );
+    if (error) throw error;
+    return (rows as StyleRequestRow[]) || [];
   } catch (e) {
     console.warn('listStyleRequests failed', e);
     return [];
   }
 }
 
-export async function listPurchaseRequests(): Promise<PurchaseRequestRow[]> {
+export async function listPurchaseRequests(limit = 50): Promise<PurchaseRequestRow[]> {
   const { data } = await supabase.auth.getUser();
-  if (!data.user) return [];
+  const user = data.user;
+  if (!user) return [];
   try {
-    const res: any = await (supabase as any).from('purchase_requests').select('*');
-    const rows: PurchaseRequestRow[] = res?.data || [];
-    return rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const { data: rows, error } = await withTimeout(
+      (supabase as any)
+        .from('purchase_requests')
+        .select('id, user_id, total_krw, items, status, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(limit)
+    );
+    if (error) throw error;
+    return (rows as PurchaseRequestRow[]) || [];
   } catch (e) {
     console.warn('listPurchaseRequests failed', e);
     return [];
