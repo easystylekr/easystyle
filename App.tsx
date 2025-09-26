@@ -2,7 +2,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import { AppScreen, Product, ProductCategory } from './types';
 import { generateStyle, getProductsForStyle, validatePrompt, cropImageForProduct } from './services/styleProvider';
 import { recordStyleRequest, recordPurchaseRequest, recordStyleSession } from './services/db';
-import { uploadBase64Image } from './services/storage';
+import { localImageStorage } from './services/localImageStorage';
 import { comprehensiveProductSearch, ProductSearchResult } from './services/shoppingSearchAgent';
 import { saveProductSearchSession, saveProductSearchResults } from './services/productStorageService';
 import { progressiveOptimization, createFastPreview } from './services/imageOptimizer';
@@ -364,30 +364,44 @@ const App: React.FC = () => {
                 }
             }
             setStyledResult({ imageBase64: styledImageBase64, description });
+
+            // 즉시 로컬에 저장하고 백그라운드에서 업로드
+            console.log('💾 [executeStyleGeneration] Saving images locally and scheduling background upload...');
+            const localSaveStartTime = performance.now();
+
             try {
-              const { data: userData } = await supabase.auth.getUser();
-              const uid = userData.user?.id || 'anon';
-              const ts = Date.now();
-              const bucket = 'styling';
-              const origExt = (originalImage.mimeType?.split('/')?.[1] || 'png').toLowerCase();
-              const paths = {
-                orig: `${uid}/${ts}/original.${origExt}`,
-                styled: `${uid}/${ts}/styled.png`,
-              };
-              const uploadedOrig = await uploadBase64Image(bucket, paths.orig, originalImage.base64, originalImage.mimeType || 'image/png');
-              const uploadedStyled = await uploadBase64Image(bucket, paths.styled, styledImageBase64, 'image/png');
-              recordStyleSession({
-                userPrompt: meta?.userPrompt ?? prompt,
-                userAnswer: meta?.userAnswer ?? userAnswer,
-                fullPrompt: finalPrompt,
-                description,
-                modelProvider: (import.meta as any).env?.VITE_STYLE_PROVIDER,
-                originalImagePath: uploadedOrig?.path,
-                styledImagePath: uploadedStyled?.path,
-              }).catch((e) => console.warn('recordStyleSession failed', e));
+              const localImageId = localImageStorage.saveLocally({
+                originalImage: {
+                  base64: originalImage.base64,
+                  mimeType: originalImage.mimeType || 'image/png'
+                },
+                styledImage: {
+                  base64: styledImageBase64,
+                  mimeType: 'image/png'
+                },
+                metadata: {
+                  userPrompt: meta?.userPrompt ?? prompt,
+                  userAnswer: meta?.userAnswer ?? userAnswer,
+                  fullPrompt: finalPrompt,
+                  description,
+                  modelProvider: (import.meta as any).env?.VITE_STYLE_PROVIDER || 'gemini',
+                  timestamp: Date.now()
+                }
+              });
+
+              console.log('✅ [executeStyleGeneration] Local save completed', {
+                duration: `${(performance.now() - localSaveStartTime).toFixed(0)}ms`,
+                localImageId: localImageId
+              });
+
             } catch (e) {
-              console.warn('image upload/session record failed', e);
-              recordStyleRequest(finalPrompt, (import.meta as any).env?.VITE_STYLE_PROVIDER).catch((e2: any) => console.warn('recordStyleRequest failed', e2));
+              console.warn('❌ [executeStyleGeneration] Local save failed, falling back to direct upload:', e);
+              // 폴백: 직접 업로드 (하지만 시간이 걸림)
+              try {
+                recordStyleRequest(finalPrompt, (import.meta as any).env?.VITE_STYLE_PROVIDER).catch((e2: any) => console.warn('recordStyleRequest failed', e2));
+              } catch (fallbackError) {
+                console.error('Fallback storage also failed:', fallbackError);
+              }
             }
 
             setLoadingMessage('스타일에 맞는 상품을 찾고 있어요...');
