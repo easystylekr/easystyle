@@ -230,10 +230,10 @@ export const generateStyleWithFallback = async (
         } catch (nanoError) {
           console.error('[aiStyleService] Even NanoBanana failed:', nanoError);
 
-          // 최종 기본 응답
+          // 최종 기본 응답 - 원본 이미지와 기본 설명 제공
           return {
-            styledImageBase64: '',
-            description: '죄송합니다. 현재 AI 서비스가 일시적으로 불안정합니다. 잠시 후 다시 시도해 주세요.',
+            styledImageBase64: imageBase64, // 원본 이미지 제공하여 UI 중단 방지
+            description: `스타일 분석을 위해 업로드해주신 이미지를 확인했습니다. ${prompt}에 대한 맞춤형 상품 추천을 아래에서 확인해보세요. AI 서비스가 일시적으로 불안정하여 원본 이미지를 기준으로 상품을 추천해드립니다.`,
             model: 'fallback',
             provider: 'openai'
           };
@@ -258,10 +258,10 @@ export const generateStyleWithFallback = async (
       } catch (nanoError) {
         console.error('[aiStyleService] NanoBanana also failed (no OpenAI):', nanoError);
 
-        // 최종 기본 응답
+        // 최종 기본 응답 - 원본 이미지와 기본 설명 제공
         return {
-          styledImageBase64: '',
-          description: '죄송합니다. 현재 AI 서비스가 일시적으로 불안정합니다. 잠시 후 다시 시도해 주세요.',
+          styledImageBase64: imageBase64, // 원본 이미지 제공하여 UI 중단 방지
+          description: `스타일 분석을 위해 업로드해주신 이미지를 확인했습니다. ${prompt}에 대한 맞춤형 상품 추천을 아래에서 확인해보세요. AI 서비스가 일시적으로 불안정하여 원본 이미지를 기준으로 상품을 추천해드립니다.`,
           model: 'fallback',
           provider: 'openai'
         };
