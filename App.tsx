@@ -269,15 +269,30 @@ const App: React.FC = () => {
             
             setStyledResult({ imageBase64: result.imageBase64, description: result.description });
 
-            setLoadingMessage('상품 이미지를 준비하고 있어요...');
+            setLoadingMessage('AI가 각 상품 이미지를 스타일링 사진에서 추출하고 있어요...');
             const productsWithCroppedImages = await Promise.all(
-                result.products.map(async (product) => {
-                    const croppedBase64 = await cropImageForProduct(
-                        result.imageBase64,
-                        product.category,
-                        product.name
-                    );
-                    return { ...product, croppedImageBase64: croppedBase64 || undefined };
+                result.products.map(async (product, index) => {
+                    try {
+                        console.log(`크롭 시작: ${product.category} - ${product.name}`);
+                        setLoadingMessage(`${product.category} 상품 이미지 추출 중... (${index + 1}/${result.products.length})`);
+
+                        const croppedBase64 = await cropImageForProduct(
+                            result.imageBase64,
+                            product.category,
+                            product.name
+                        );
+
+                        if (croppedBase64) {
+                            console.log(`크롭 성공: ${product.category} - ${product.name}`);
+                            return { ...product, croppedImageBase64: croppedBase64 };
+                        } else {
+                            console.log(`크롭 실패, 전체 이미지 사용: ${product.category} - ${product.name}`);
+                            return { ...product, croppedImageBase64: undefined };
+                        }
+                    } catch (error) {
+                        console.error(`크롭 오류: ${product.category} - ${product.name}`, error);
+                        return { ...product, croppedImageBase64: undefined };
+                    }
                 })
             );
             

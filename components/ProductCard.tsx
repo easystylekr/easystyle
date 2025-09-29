@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Product } from '../types';
 import { CheckCircleIcon, RadioButtonIcon } from './icons';
 
@@ -10,18 +10,40 @@ interface ProductCardProps {
 }
 
 const ProductCard: React.FC<ProductCardProps> = ({ product, isSelected, onSelect, fallbackImageUrl }) => {
-  const [imgSrc, setImgSrc] = useState(product.imageUrl);
-  const hasTriedCroppedFallback = useRef(false);
+  // AI가 크롭한 이미지를 최우선으로 사용
+  const getInitialImageSrc = () => {
+    if (product.croppedImageBase64) {
+      return `data:image/png;base64,${product.croppedImageBase64}`;
+    }
+    return product.imageUrl;
+  };
+
+  const [imgSrc, setImgSrc] = useState(getInitialImageSrc());
+  const hasTriedFallbacks = useRef(false);
+
+  // 상품이 업데이트될 때마다 이미지 재설정
+  useEffect(() => {
+    const newImageSrc = getInitialImageSrc();
+    if (newImageSrc !== imgSrc) {
+      setImgSrc(newImageSrc);
+      hasTriedFallbacks.current = false; // 재설정 시 오류 시도 플래그도 리셋
+    }
+  }, [product.croppedImageBase64, product.imageUrl]);
 
   const handleError = () => {
-    // 1순위: 실제 상품 이미지 (초기값)
-    // 2순위: AI가 생성한 부분 확대 이미지
-    if (product.croppedImageBase64 && !hasTriedCroppedFallback.current) {
-      setImgSrc(`data:image/png;base64,${product.croppedImageBase64}`);
-      hasTriedCroppedFallback.current = true;
-    } else {
-    // 3순위: 전체 스타일링 이미지
-      setImgSrc(fallbackImageUrl);
+    if (!hasTriedFallbacks.current) {
+      hasTriedFallbacks.current = true;
+      // AI 크롭 이미지가 실패하면 전체 스타일링 이미지 사용
+      if (product.croppedImageBase64 && imgSrc.includes('base64')) {
+        setImgSrc(fallbackImageUrl);
+      } else {
+        // 플레이스홀더가 실패하면 AI 크롭 이미지나 전체 이미지 시도
+        if (product.croppedImageBase64) {
+          setImgSrc(`data:image/png;base64,${product.croppedImageBase64}`);
+        } else {
+          setImgSrc(fallbackImageUrl);
+        }
+      }
     }
   };
 

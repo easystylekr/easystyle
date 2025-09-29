@@ -304,15 +304,23 @@ export const cropImageForProduct = async (
     const cropInstruction = getCropInstructionByCategory(productCategory, productName);
 
     const prompt = `
-    이 스타일링된 이미지에서 ${productCategory} 카테고리의 "${productName}" 제품을 추출해서 상품 이미지로 만들어줘.
+    이 전체 스타일링 이미지에서 "${productName}" (${productCategory})을 정확히 찾아서 상품 이미지로 크롭해줘.
+
+    작업 단계:
+    1. 이미지에서 해당 ${productCategory} 제품을 정확히 식별
+    2. 제품이 잘 보이는 각도와 범위로 크롭
+    3. 제품의 형태와 디테일이 명확히 드러나도록 프레임 조정
 
     ${cropInstruction}
 
-    최종 결과물은:
-    - 상품만 명확하게 보이도록 크롭
-    - 깨끗한 배경 (흰색 또는 투명)
-    - 상품의 디테일이 잘 보이도록 적절한 크기
-    - 전문적인 상품 사진 품질
+    중요 사항:
+    - 착용된 상태 그대로 자연스럽게 크롭 (제품만 분리하지 말고)
+    - 제품의 핏과 스타일링 효과가 잘 보이도록
+    - 배경은 자연스럽게 포함하되 제품에 집중
+    - 상품 쇼핑몰에서 볼 수 있는 품질의 이미지로 생성
+    - 제품이 불분명하거나 찾을 수 없다면 전체 스타일링의 해당 부분을 포함하여 크롭
+
+    결과: 전문적인 상품 이미지 (착용 상태)
     `;
 
     try {
