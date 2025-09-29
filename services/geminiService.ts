@@ -2,6 +2,81 @@ import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { Product, ProductCategory } from '../types';
 import { searchNaverShopping } from './naverService';
 
+/**
+ * Determines appropriate background context based on style prompt and description
+ */
+const getBackgroundContext = (prompt: string, description: string): { description: string; setting: string; lighting: string } => {
+    const combinedText = `${prompt} ${description}`.toLowerCase();
+
+    // Business/Formal contexts
+    if (combinedText.includes('비즈니스') || combinedText.includes('정장') || combinedText.includes('회사') ||
+        combinedText.includes('미팅') || combinedText.includes('오피스') || combinedText.includes('formal') ||
+        combinedText.includes('business')) {
+        return {
+            description: "Modern office environment with clean glass windows and city view",
+            setting: "Professional office space with minimalist interior design",
+            lighting: "Natural daylight from large windows with soft indoor lighting"
+        };
+    }
+
+    // Casual/Dating contexts
+    if (combinedText.includes('데이트') || combinedText.includes('카페') || combinedText.includes('브런치') ||
+        combinedText.includes('casual') || combinedText.includes('date') || combinedText.includes('coffee')) {
+        return {
+            description: "Cozy urban cafe setting with warm wooden interior and plants",
+            setting: "Trendy cafe with exposed brick walls and natural materials",
+            lighting: "Warm ambient lighting with natural window light"
+        };
+    }
+
+    // Party/Night out contexts
+    if (combinedText.includes('파티') || combinedText.includes('클럽') || combinedText.includes('밤') ||
+        combinedText.includes('party') || combinedText.includes('night') || combinedText.includes('evening')) {
+        return {
+            description: "Sophisticated urban nightlife setting with city lights",
+            setting: "Upscale rooftop lounge or modern bar with city skyline",
+            lighting: "Moody evening lighting with warm accent lights and city glow"
+        };
+    }
+
+    // Outdoor/Active contexts
+    if (combinedText.includes('야외') || combinedText.includes('공원') || combinedText.includes('걷기') ||
+        combinedText.includes('outdoor') || combinedText.includes('park') || combinedText.includes('활동')) {
+        return {
+            description: "Beautiful urban park setting with trees and modern architecture",
+            setting: "Contemporary city park with walking paths and green spaces",
+            lighting: "Natural daylight with soft shadows from trees"
+        };
+    }
+
+    // Shopping/Street contexts
+    if (combinedText.includes('쇼핑') || combinedText.includes('거리') || combinedText.includes('스트리트') ||
+        combinedText.includes('shopping') || combinedText.includes('street') || combinedText.includes('urban')) {
+        return {
+            description: "Vibrant city street with modern storefronts and urban atmosphere",
+            setting: "Stylish shopping district with contemporary architecture",
+            lighting: "Bright daylight with urban ambiance"
+        };
+    }
+
+    // Travel/Vacation contexts
+    if (combinedText.includes('여행') || combinedText.includes('휴가') || combinedText.includes('바다') ||
+        combinedText.includes('travel') || combinedText.includes('vacation') || combinedText.includes('beach')) {
+        return {
+            description: "Scenic travel destination with beautiful natural backdrop",
+            setting: "Picturesque location with natural beauty and architectural elements",
+            lighting: "Golden hour lighting with natural warm tones"
+        };
+    }
+
+    // Default: Clean, versatile background
+    return {
+        description: "Clean, modern studio setting with subtle architectural elements",
+        setting: "Minimalist contemporary space with neutral tones and geometric elements",
+        lighting: "Professional studio lighting with soft, even illumination"
+    };
+};
+
 // Fix: Initialize the Gemini API client. This is required for all API calls.
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -144,15 +219,25 @@ export const generateStyleWithRealProducts = async (
             throw new Error("추천할만한 상품을 찾지 못했습니다. 다른 스타일로 시도해보세요.");
         }
 
-        // Step 3: Generate the final styled image using the found products.
+        // Step 3: Generate the final styled image using the found products with contextual background.
         const productInfoForImageGen = foundProducts.map(p => `- ${p.category}: ${p.brand} ${p.name}`).join('\n');
+
+        // Determine appropriate background based on style context
+        const backgroundContext = getBackgroundContext(prompt, description);
+
         const imageGenPrompt = `
         Original photo of the person is provided.
         New style description: "${description}"
         Real products to use for the new style:
         ${productInfoForImageGen}
 
-        Generate a new, photorealistic image of the person from the original photo. They should be wearing the new style composed of the exact products listed. The person's face and body should be preserved. The background should be a simple, neutral studio background.
+        Generate a new, photorealistic image of the person from the original photo. They should be wearing the new style composed of the exact products listed. The person's face and body should be preserved.
+
+        Background: ${backgroundContext.description}
+        Setting: ${backgroundContext.setting}
+        Lighting: ${backgroundContext.lighting}
+
+        Make sure the background complements the style and creates an appropriate atmosphere for the outfit. The image should look natural and professionally styled.
         `;
         
         // Fix: Use the correct image editing model 'gemini-2.5-flash-image-preview'.
@@ -201,7 +286,7 @@ export const generateStyleWithRealProducts = async (
 };
 
 /**
- * Crops a specific product from a larger styled image to create a thumbnail.
+ * Crops a specific product from a larger styled image to create a thumbnail with category-specific instructions.
  * @param styledImageBase64 The base64 string of the main styled image.
  * @param productCategory The category of the product to crop.
  * @param productName The name of the product to crop.
@@ -214,7 +299,21 @@ export const cropImageForProduct = async (
 ): Promise<string | null> => {
     // Fix: Use the correct image editing model 'gemini-2.5-flash-image-preview'.
     const model = 'gemini-2.5-flash-image-preview';
-    const prompt = `이 이미지에서 "${productName}" (${productCategory}) 제품만 클로즈업해서 잘라내줘. 배경은 제거하고 제품만 명확하게 보여줘.`;
+
+    // Get category-specific cropping instructions
+    const cropInstruction = getCropInstructionByCategory(productCategory, productName);
+
+    const prompt = `
+    이 스타일링된 이미지에서 ${productCategory} 카테고리의 "${productName}" 제품을 추출해서 상품 이미지로 만들어줘.
+
+    ${cropInstruction}
+
+    최종 결과물은:
+    - 상품만 명확하게 보이도록 크롭
+    - 깨끗한 배경 (흰색 또는 투명)
+    - 상품의 디테일이 잘 보이도록 적절한 크기
+    - 전문적인 상품 사진 품질
+    `;
 
     try {
         const response = await ai.models.generateContent({
@@ -231,7 +330,7 @@ export const cropImageForProduct = async (
                 responseModalities: [Modality.IMAGE, Modality.TEXT]
             }
         });
-        
+
         // Add a defensive check to ensure candidates exist before processing.
         if (response.candidates && response.candidates.length > 0 && response.candidates[0].content && response.candidates[0].content.parts) {
             for (const part of response.candidates[0].content.parts) {
@@ -240,7 +339,7 @@ export const cropImageForProduct = async (
                 }
             }
         }
-        
+
         console.warn(`Could not crop image for product: ${productName}`);
         return null;
 
@@ -248,5 +347,56 @@ export const cropImageForProduct = async (
         console.error(`Error cropping image for ${productName}:`, error);
         // Don't throw, as this is a non-critical enhancement. Return null instead.
         return null;
+    }
+};
+
+/**
+ * Gets category-specific cropping instructions
+ */
+const getCropInstructionByCategory = (category: ProductCategory, productName: string): string => {
+    switch (category) {
+        case '상의':
+            return `
+            상의 (${productName})에 집중해서:
+            - 셔츠/블라우스/니트 등의 전체 형태가 보이도록
+            - 어깨부터 허리 또는 엉덩이까지 포함
+            - 소매와 칼라 디테일이 명확히 보이도록
+            - 옷의 핏과 실루엣이 잘 드러나도록
+            `;
+
+        case '하의':
+            return `
+            하의 (${productName})에 집중해서:
+            - 바지/스커트/반바지의 전체 길이가 보이도록
+            - 허리부터 발목 또는 무릎까지 포함
+            - 핏과 실루엣이 명확히 드러나도록
+            - 주름이나 라인이 자연스럽게 보이도록
+            `;
+
+        case '신발':
+            return `
+            신발 (${productName})에 집중해서:
+            - 신발 전체가 명확히 보이도록
+            - 발과 발목 부분도 약간 포함
+            - 신발의 형태와 스타일이 잘 드러나도록
+            - 측면 또는 전면에서 가장 매력적인 각도로
+            `;
+
+        case '악세서리':
+            return `
+            악세서리 (${productName})에 집중해서:
+            - 가방/모자/목걸이/귀걸이 등을 클로즈업
+            - 악세서리가 착용된 상태로 자연스럽게
+            - 디테일과 질감이 명확히 보이도록
+            - 주변 컨텍스트도 약간 포함하여 사용감 표현
+            `;
+
+        default:
+            return `
+            해당 제품을 중심으로:
+            - 제품의 전체적인 모습이 보이도록
+            - 착용된 상태에서 자연스럽게
+            - 제품의 특징이 잘 드러나도록
+            `;
     }
 };
