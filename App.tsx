@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { AppScreen, Product, ProductCategory, User, StyleHistoryItem, PurchaseRequest, PurchaseRequestStatus } from './types';
 import { generateStyleWithRealProducts, generateFollowUpQuestion, cropImageForProduct } from './services/geminiService';
+import { processImageFile } from './utils/imageUtils';
 import Header from './components/Header';
 import Spinner from './components/Spinner';
 import ProductCard from './components/ProductCard';
@@ -185,22 +186,24 @@ const App: React.FC = () => {
     }, [selectedProducts]);
 
 
-    const handleImageSelect = (file: File) => {
+    const handleImageSelect = async (file: File) => {
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const result = e.target?.result as string;
-            const base64 = result.split(',')[1];
-            if (base64) {
-                setOriginalImage({ base64, mimeType: file.type, url: URL.createObjectURL(file) });
-                setScreen(AppScreen.Styling);
-                setError(null);
-            } else {
-                setError('이미지 파일을 처리하는 데 실패했습니다. 다른 파일을 시도해 주세요.');
-            }
-        };
-        reader.onerror = () => setError('이미지 파일을 읽는 중 오류가 발생했습니다.');
-        reader.readAsDataURL(file);
+
+        try {
+            setError(null);
+            // Process the image file to ensure it's in a supported format
+            const processedImage = await processImageFile(file);
+
+            setOriginalImage({
+                base64: processedImage.base64,
+                mimeType: processedImage.mimeType,
+                url: URL.createObjectURL(file)
+            });
+            setScreen(AppScreen.Styling);
+        } catch (error) {
+            console.error('Image processing error:', error);
+            setError(error instanceof Error ? error.message : '이미지 파일을 처리하는 데 실패했습니다. 다른 파일을 시도해 주세요.');
+        }
     };
 
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
