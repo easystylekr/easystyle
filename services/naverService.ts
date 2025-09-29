@@ -1,5 +1,6 @@
 // Fix: Replaced placeholder content with a functional mock implementation to resolve module errors.
 import { Product } from '../types';
+import { generatePlaceholderImage } from '../utils/placeholderUtils';
 
 /**
  * Mocks a search for a product on Naver Shopping.
@@ -23,11 +24,14 @@ export const searchNaverShopping = async (query: string): Promise<Omit<Product, 
     const brands = ['BEAMS', 'Maison Kitsuné', 'A.P.C.', 'Nike', 'Adidas', 'New Balance'];
     const brand = brands[Math.floor(Math.random() * brands.length)];
 
+    // Generate local placeholder image instead of using external service
+    const placeholderImage = generatePlaceholderImage(query, 400, 500);
+
     return {
         brand: brand,
         name: `${query.replace(/"/g, '')}`,
         price: price,
-        imageUrl: `https://via.placeholder.com/400x500.png?text=${encodeURIComponent(query)}`,
+        imageUrl: placeholderImage, // Use local placeholder instead of via.placeholder.com
         recommendedSize: 'Free',
         productUrl: `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(query)}`,
         storeName: `${brand} 공식 스토어`,
